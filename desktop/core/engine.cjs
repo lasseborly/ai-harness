@@ -179,7 +179,17 @@ class OpenCodeEngine {
   // resume: en tidligere OpenCode-session for samme samtale. Findes den ikke længere, oprettes en ny.
   constructor({ root, directory, provider, model, references = [], mode = 'free', skills = [], resume = null, sandbox = null, detached = false, onEvent = () => {} }) { Object.assign(this, { root, directory, provider, model, references, mode, skills, resume, sandbox, detached, onEvent }); this.pending = new Map(); this.active = false; this.resumed = false; }
   async request(url, method = 'GET', body, signal) {
-    const response = await fetch(`${this.url}${url}`, { method, headers: { authorization: this.auth, 'content-type': 'application/json', 'x-opencode-directory': encodeURIComponent(this.root) }, body: body === undefined ? undefined : JSON.stringify(body), signal: signal || AbortSignal.timeout(15000), redirect: 'error' });
+    const send = () => fetch(`${this.url}${url}`, { method, headers: { authorization: this.auth, 'content-type': 'application/json', 'x-opencode-directory': encodeURIComponent(this.root) }, body: body === undefined ? undefined : JSON.stringify(body), signal: signal || AbortSignal.timeout(15000), redirect: 'error' });
+    let response;
+    try { response = await send(); }
+    catch (error) {
+      // Netværksfejl betyder, at requesten aldrig nåede motoren. Efter en genstart kan klienten
+      // genbruge en død keep-alive-forbindelse til den gamle proces på samme port. Et nyt GET-kald
+      // kan trygt forsøges én gang igen; en skrivende request sendes aldrig dobbelt.
+      const netværk = error?.name === 'TypeError' && /ECONNRESET|ECONNREFUSED|EPIPE|socket hang up/i.test(String(error.cause?.code || error.cause?.message || ''));
+      if (method !== 'GET' || !netværk) throw error;
+      response = await send();
+    }
     if (!response.ok) throw new Error(`Agentmotoren afviste handlingen (HTTP ${response.status}).`);
     if (response.status === 204) return null;
     return response.json();
