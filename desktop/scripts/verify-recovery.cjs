@@ -22,7 +22,8 @@ const { skipIntroduction, menuClick, taskOptions, selectMode } = require('./ui-t
     if(req.url==='/v1/models'){res.setHeader('content-type','application/json');return res.end(JSON.stringify({data:[{id:'recovery-model'}]}));}
     requests++; let raw='';for await(const chunk of req) raw+=chunk;const body=JSON.parse(raw);
     if(mode==='key'||mode==='quota'){res.writeHead(mode==='key'?401:402,{'content-type':'application/json'});return res.end(JSON.stringify({error:{message:'SKJULT_UDVIDERTEKST'}}));}
-    const chunk={id:'recovery-'+requests,object:'chat.completion.chunk',created:1,model:body.model,choices:[{index:0,delta:{role:'assistant',content:mode==='ok'?plan:mode==='wait'?'Delvist svar før brugerens stop.':'Delvist svar før afbrydelsen.'},finish_reason:null}]};
+    const okPlan='Forslag til næste skridt.\n\nDet bygger vi\nVi bevarer den eksisterende side og dens lokale data og tilføjer en tydelig tilmeldingsknap.\n\nSådan skal det se ud\nKnappen sidder fremme i siden og virker på både mobil og computer.\n\nTeknik og data\nVi bruger projektets eksisterende HTML uden nye pakker eller konti.\n\nDet skal du prøve\nKlik på tilmeldingsknappen på en smal og en bred skærm.';
+    const chunk={id:'recovery-'+requests,object:'chat.completion.chunk',created:1,model:body.model,choices:[{index:0,delta:{role:'assistant',content:mode==='ok'?okPlan:mode==='wait'?'Delvist svar før brugerens stop.':'Delvist svar før afbrydelsen.'},finish_reason:null}]};
     res.writeHead(200,{'content-type':'text/event-stream'});res.write('data: '+JSON.stringify(chunk)+'\n\n');
     if(mode==='stream'){setTimeout(()=>res.destroy(),100);return;}
     if(mode==='wait')return;
