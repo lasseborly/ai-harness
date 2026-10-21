@@ -27,6 +27,12 @@ jobs:
             arch: x64
             app: release/win-unpacked/Aura.exe
             resources: release/win-unpacked/resources
+          - os: ubuntu-26.04
+            target: linux-x64
+            command: package:linux
+            arch: x64
+            app: release/linux-unpacked/Aura
+            resources: release/linux-unpacked/resources
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -39,6 +45,17 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
       - run: npm ci
+      - name: Klargør skærm og nøglering til GUI-prøver på Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb dbus-x11 gnome-keyring libsecret-1-0
+          Xvfb :99 -screen 0 1440x900x24 >/dev/null 2>&1 &
+          echo 'DISPLAY=:99' >> "$GITHUB_ENV"
+          mkdir -p /tmp/aura-dbus && chmod 700 /tmp/aura-dbus
+          dbus-daemon --session --address=unix:path=/tmp/aura-dbus/bus --fork
+          echo 'DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/aura-dbus/bus' >> "$GITHUB_ENV"
+          echo '' | gnome-keyring-daemon --start --daemonize --components=secrets
       - run: npm run runtime:prepare -- ${{ matrix.target }}
       - name: Afprøv kildekoden før pakning
         run: npm test
@@ -53,6 +70,9 @@ jobs:
       - name: Afprøv den pakkede app på Windows
         if: runner.os == 'Windows'
         run: npm run test:package -- "release/win-unpacked/Aura.exe"
+      - name: Afprøv den pakkede app på Linux
+        if: runner.os == 'Linux'
+        run: npm run test:package -- "release/linux-unpacked/Aura"
       - name: Afprøv gendannelse og forbindelsesfejl i pakken
         run: npm run test:recovery
         env:
@@ -73,6 +93,7 @@ jobs:
             desktop/release/*.dmg
             desktop/release/*.zip
             desktop/release/*.exe
+            desktop/release/*.AppImage
             desktop/release/*.json
             desktop/release/*.html
             desktop/release/*.css

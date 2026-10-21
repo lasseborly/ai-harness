@@ -62,6 +62,21 @@
         "url": "https://nodejs.org/dist/v22.23.3/node-v22.23.3-win-arm64.zip",
         "checksum": "33dad22e4cef5ee8f9fbb1b0d037fdacd0e56d12a4580f0d63f68b894deab535"
       }
+    },
+    "linux-x64": {
+      "opencode": {
+        "url": "https://registry.npmjs.org/opencode-linux-x64/-/opencode-linux-x64-1.18.33.tgz",
+        "integrity": "sha512-q/t/3p2CTxOT9y2kvjesb/LZab2+1eqlhhWA02Be6mjTtmYtNBcBsrI5yDo4Fw7ZSPBW2oyMIGMNRqiKQjiAWw=="
+      },
+      "git": {
+        "name": "dugite-native-v2.53.0-4098283-ubuntu-x64.tar.gz",
+        "url": "https://github.com/desktop/dugite-native/releases/download/v2.53.0-4/dugite-native-v2.53.0-4098283-ubuntu-x64.tar.gz",
+        "checksum": "cca76aa31ad9e835e771ee7f55b73934777fbd8d16757a10d307ba06de860901"
+      },
+      "node": {
+        "url": "https://nodejs.org/dist/v22.23.3/node-v22.23.3-linux-x64.tar.gz",
+        "checksum": "1084aa36196bba4c3a5e69a1ee388a6e4ff729dad09445fbcd434b28fe3c24af"
+      }
     }
   },
   "sources": [

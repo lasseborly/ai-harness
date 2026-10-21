@@ -7,7 +7,8 @@ function channelFor(version) { return semver.prerelease(version)?.[0] === 'beta'
 function validateInfo(info, { version, platform, arch }) {
   if (!semver.valid(info?.version) || !/^\d+\.\d+\.\d+(?:-beta\.\d+)?$/.test(info.version) || !semver.gt(info.version, version)) throw new Error('Udgivelsens version er ugyldig.');
   if (channelFor(version) === 'latest' && semver.prerelease(info.version)) throw new Error('En stabil version må ikke hente en beta.');
-  const name = `Aura-${info.version}-${platform === 'darwin' ? 'mac' : 'win'}-${arch}.${platform === 'darwin' ? 'zip' : 'exe'}`;
+  const ext = platform === 'darwin' ? 'zip' : platform === 'linux' ? 'AppImage' : 'exe';
+  const name = `Aura-${info.version}-${platform === 'darwin' ? 'mac' : platform === 'linux' ? 'linux' : 'win'}-${arch}.${ext}`;
   const expected = `${RELEASES}download/v${info.version}/${name}`;
   if (info.files?.length !== 1 || info.files[0].url !== expected || !/^[A-Za-z0-9+/]{86}==$/.test(info.files[0].sha512 || '') || !Number.isSafeInteger(info.files[0].size) || info.files[0].size <= 0 || info.packages || info.path && info.path !== expected) throw new Error('Opdateringsfilen matcher ikke Auras udgivelse.');
   if (info.critical !== undefined && typeof info.critical !== 'boolean') throw new Error('Ugyldig sikkerhedsmeddelelse.');
@@ -17,7 +18,7 @@ function validateInfo(info, { version, platform, arch }) {
 class Updates {
   constructor({ updater, store, version, platform = process.platform, arch = process.arch, enabled = true, emit = () => {}, busy = () => false, prepare = async () => {}, install = () => updater.quitAndInstall(false, true) }) {
     Object.assign(this, { updater, store, version, platform, arch, emit, busy, prepare, install });
-    this.enabled = enabled && ['darwin', 'win32'].includes(platform) && ['arm64', 'x64'].includes(arch);
+    this.enabled = Boolean(enabled && updater && (['darwin', 'win32'].includes(platform) && ['arm64', 'x64'].includes(arch) || (platform === 'linux' && arch === 'x64')));
     this.state = { phase: this.enabled ? 'idle' : 'unavailable', current: version, channel: channelFor(version), automatic: true, available: null, warning: null, checkedAt: null, error: '', percent: 0 };
     if (!this.enabled) return;
     this.connect(updater);

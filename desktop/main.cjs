@@ -896,7 +896,7 @@ app.whenReady().then(async () => {
   promtePreview = new (require('./core/promte-preview.cjs').PromtePreview)(workbench.store, { setup: deploymentSetup.promte, enabled: async root => (await workbench.features.get(root)).effective['integration-promte'] === true });
   komplaiPreview = new (require('./core/komplai-preview.cjs').KomplaiPreview)(workbench.store, { provider: deployments.providers.komplai, enabled: async root => (await workbench.features.get(root)).effective['integration-komplai-run'] === true });
   updates = new (require('./core/updates.cjs').Updates)({
-    updater: app.isPackaged && ['darwin', 'win32'].includes(process.platform) ? require('electron-updater').autoUpdater : null,
+    updater: app.isPackaged && (['darwin', 'win32'].includes(process.platform) || (process.platform === 'linux' && process.env.APPIMAGE)) ? require('electron-updater').autoUpdater : null,
     store: workbench.store, version: app.getVersion(), enabled: app.isPackaged,
     emit: event => { if (['error', 'ready'].includes(event.value.phase) && updating) { updating = false; quitReady = false; } sendEvent(event); },
     busy: () => operations.size > 0 || updating || registry.allChats().some(c => c.running || c.sending || c.starting || c.finishing)

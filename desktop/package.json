@@ -42,6 +42,7 @@
     "runtime:prepare": "node scripts/prepare-runtime.cjs",
     "package:mac": "electron-builder --config electron-builder.cjs --mac --publish never",
     "package:windows": "electron-builder --config electron-builder.cjs --win --publish never",
+    "package:linux": "electron-builder --config electron-builder.cjs --linux --x64 --publish never",
     "test:package": "node scripts/verify-package.cjs",
     "release:site": "node scripts/release-site.cjs",
     "test:resume": "node scripts/verify-resume.cjs",

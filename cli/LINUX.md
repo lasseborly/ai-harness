@@ -1,6 +1,6 @@
 # Afprøv Aura CLI på Linux
 
-CLI'en kræver Node 22.12 eller nyere, npm og Git på en udviklingsmaskine. Der er motorpakker til x64 og arm64 med glibc og musl. **Den aktuelle CLI er endnu ikke afprøvet på Linux.** Vi distribuerer ikke en Linux-desktopapp i denne udgivelse.
+CLI'en kræver Node 22.12 eller nyere, npm og Git på en udviklingsmaskine. Der er motorpakker til x64 og arm64 med glibc og musl. **Den aktuelle CLI er endnu ikke afprøvet på Linux.** Desktopappen distribueres nu også som en usigneret AppImage til Linux x64 (glibc); se [pakkevejledningen](../desktop/README.md#installationspakker--beta) og [udgivelsesvejledningen](../docs/udgivelse.md). CLI'en selv distribueres som npm-pakke på tværs af platforme.
 
 ## Hent og installer
 

@@ -4,6 +4,18 @@ Senest kontrolleret 23. oktober 2026. Afsnittene er daterede, så tidligere begr
 
 [Gennemgangen før offentlig beta](offentliggoerelse.md) samler historik- og logkontrol samt de lokale prøver af README, hjemmeside og udgivelseskontrol. Den offentliggør ikke appen og ændrer ikke installationsstatus nedenfor.
 
+## Linux som desktopplatform · 21. oktober 2026
+
+**Bygget og afprøvet på en Linux-maskine med X11 og GNOME Keyring.** `npm run package:linux` fremstiller `Aura-0.4.0-beta.1-linux-x64.AppImage` (323 MB) og `release/linux-unpacked`. AppImage'en er usigneret, som beslutningen beskriver.
+
+- **Pakkeprøven:** `npm run test:package -- release/linux-unpacked/Aura` består. Udgivelseskontrakten, tests for opdateringsfeeds og tests for udgivelsessiden kræver nu også AppImage-filen og `beta-linux.yml`; de løber lokalt.
+- **Hele testsuiten:** `npm test` i `desktop` giver 345/345 på Linux.
+- **Gennemgående forløb:** `npm run test:recovery` og `npm run test:live-app -- --controlled` (styret af mock-motoren) består på Linux. De to prøver fejlede først, og det viste sig at være to forskellige fejl, der intet havde med Linux at gøre: mockplanerne var forældede, så plan-kortet aldrig dukkede op, og en rigtig fejl i appen.
+- **Rettet undervejs — genbrug af død forbindelse efter motorgenstart:** OpenCode binder altid port 4096. Når motoren lukkes og startes igen, kan appens HTTP-klient genbruge den døde keep-alive-forbindelse til den gamle proces, så det første kald får ECONNRESET, og opgaven fejler, før den overhovedet når motoren. Fejlen rammer alle platforme. Appen forsøger nu ét nyt læsekald, når et GET-kald fejler på netværksniveau; et skrivende kald sendes aldrig to gange.
+- **Nøglering:** Gemt og læst AI-nøgle via GNOME Keyring i den kørende app. Fejlbeskeden, når nøgletjenesten er låst, er stadig tydelig.
+- **Ikke afprøvet lokalt:** CI-opstillingen med Xvfb, D-Bus og `gnome-keyring-daemon` i `desktop-packages`-kørslen. Maskinen her har verken `sudo` eller Xvfb, så bootstrap-afsnittet er skrevet efter dokumentationen og skal bekræves af den første GitHub-kørsel. AppImage-filen er ikke prøvet på en anden distribution end den lokale.
+- **Manuel restopgave:** `desktop/scripts/verify-updates.cjs` kan ikke afprøve en AppImage-opdatering lokalt, fordi der ikke findes et ældre udgivet feed. Kontrollen er lavet som kode og feedkontrakt; den faktiske selvopdatering skal prøves, når den næste Linux-udgivelse ligger i en kladde.
+
 ## Offentlig desktopbeta 0.5.0-beta.3 · 23. oktober 2026
 
 **Udgivet og observeret:** [Aura 0.5.0-beta.3](https://github.com/ai-alliancen-org/ai-harness/releases/tag/v0.5.0-beta.3) og [downloadsiden](https://ai-alliancen-org.github.io/ai-harness/desktop.html) er offentligt tilgængelige uden GitHub-login. Letvægtstagget `v0.5.0-beta.3` peger på brugerens commit `4a265745e40dfe98c4ce267e69f5d88b3dea479a` (`klargør Aura v0.5.0-beta.3 med Promte før login, robust notarisering og opdaterede prøver`), som også var `main`, da workflowet startede. Udgivelsen er oprettet af bjornSkalkam.

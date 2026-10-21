@@ -15,8 +15,8 @@ function fixture() {
   const release = { id: 1, tag_name: `v${version}`, draft: true, prerelease: true, body: 'Syntetiske udgivelsesnoter', assets: [...files.map(f => ({ name: f.name, size: f.bytes, digest: `sha256:${f.sha256}` })), { name: 'release.json' }, { name: 'SHA256SUMS.txt' }].map(a => ({ ...a, state: 'uploaded', browser_download_url: assetURL(`v${version}`, a.name) })) };
   return { content, release, manifest, checksums };
 }
-test('Udgivelse kræver én gennemgået beta med præcis tre komplette installationsfiler', () => {
-  const f = fixture(); assert.equal(validateRelease(f.release,f.manifest,f.checksums,version).files.length,3);
+test('Udgivelse kræver én gennemgået beta med præcis fire komplette installationsfiler', () => {
+  const f = fixture(); assert.equal(validateRelease(f.release,f.manifest,f.checksums,version).files.length,4);
   for (const mutate of [
     f=>f.release.draft=false, f=>f.release.prerelease=false, f=>f.release.body='', f=>f.release.tag_name='v0.2.0-beta.5',
     f=>f.release.assets.pop(), f=>f.release.assets.push({...f.release.assets[0],name:'.env'}),
@@ -39,8 +39,8 @@ test('Desktopkladder hentes via ID og må bruge GitHubs midlertidige downloadadr
     a.browser_download_url = assetURL('untagged-9eb271ba7508f6aaf1fd', a.name);
   });
   assert.equal(selectDraft([f.release], 'v' + version).id, f.release.id);
-  assert.equal(validateAssetIDs(f.release).length, 5);
-  assert.equal(validateRelease(f.release, f.manifest, f.checksums, version).files.length, 3);
+  assert.equal(validateAssetIDs(f.release).length, 6);
+  assert.equal(validateRelease(f.release, f.manifest, f.checksums, version).files.length, 4);
   for (const mutate of [r => r.assets[0].url = 'https://example.org/fil', r => r.assets[0].id = r.assets[1].id,
     r => r.assets[1].browser_download_url = assetURL('untagged-abcdef', r.assets[1].name),
     r => r.assets[0].browser_download_url = r.assets[0].browser_download_url.replace('ai-alliancen-org', 'other'),

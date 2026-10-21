@@ -1,5 +1,15 @@
 # Produktretning og beslutninger
 
+## Linux som desktopplatform · 21. oktober 2026
+
+Brugeren har bedt om at gøre Linux til en målplatform for desktopappen. Vi distribuerer kun én filtype: et AppImage til `linux-x64` med glibc. AppImage kræver ingen installation eller rodrettigheder, virker på tværs af distributioner og er den form, electron-updater kan opdatere selv uden en pakkehåndterer. `.deb`, `.rpm` og `tar.gz` fravælges i denne beta; de kan tilføjes senere, hvis der er efterspørgsel.
+
+arm64 og musl-baserede systemer (fx Alpine) distribueres ikke. Runtime-låsen indeholder kun verificerede binære til x64, og vi har ingen afprøvningsmaskine til arm64. En forkert arkitektur ville give en app, der ikke starter, og et opdateringsfeed, ingen kan bruge.
+
+Automatisk opdatering er inkluderet fra starten: AppImage-updatereren erstatter filen, når appen er startet fra en AppImage (miljøvariablen `APPIMAGE` er sat). Kører brugeren den udpakkede mappe fra en bygning, er opdatereren slået fra i stedet for at fejle. Filen er usigneret; der findes ingen fælles tillidskæde for Linux, som svarer til Apple-notarisation eller Authenticode, så udgivelsesnoterne og downloadsidens detaljer skal sige det uden omsvøb, og brugeren fjerner selv udflagsningen før første start.
+
+Nøgleringen bruger systemets hemmelighedstjeneste via Electrons `safeStorage`, som på Linux kræver en Secret Service-tjeneste som GNOME Keyring. Electrons usikre `basic_text`-fallback med en fast offentlig adgangskode afvises i koden, så nøglen aldrig gemmes ukrypteret. Adgangen er afprøvet på en rigtig Linux-maskine med GNOME Keyring; CI's nøglering alene er ikke bevis nok.
+
 ## Promte før login · til 0.5.0-beta.3 · 22. oktober 2026
 
 En tester loggede ind hos Promte, valgte app og fik så "Promte-kildekoden mangler en gyldig package.json." Promte tager kun imod React-apps, som Promte selv bygger med sin faste Vite-opsætning. Aura starter derimod et nyt projekt som en neutral pladsholder i `public/`, og AI'en vælger teknik efter opgaven: HTML/CSS til en enkel side, React med TypeScript til en interaktiv app og Python eller Node.js til en backend. Et almindeligt Aura-projekt er derfor ikke en Promte-app, før det er bygget som en. Promte-integrationen, som giver AI'en Promtes regler, er slået fra som standard.

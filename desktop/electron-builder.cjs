@@ -12,6 +12,8 @@ module.exports = {
   dmg: { sign: false },
   win: { icon: 'packaging/icon.png', target: ['nsis'], signAndEditExecutable: true },
   nsis: { oneClick: false, perMachine: false, allowToChangeInstallationDirectory: true, createDesktopShortcut: true, deleteAppDataOnUninstall: false, language: '1030' },
+  linux: { target: ['AppImage'], icon: 'packaging/icon.png', executableName: 'Aura', category: 'Development', maintainer: 'AI-Alliancen', synopsis: 'Byg applikationer med AI, lokale projektfiler og forhåndsvisning', syncDesktopName: true },
+  appImage: { artifactName: 'Aura-${version}-linux-x64.${ext}' },
   publish: { provider: 'generic', url: 'https://ai-alliancen-org.github.io/ai-harness/updates/', channel: 'beta' },
   generateUpdatesFilesForAllChannels: false,
   beforePack: async context => {
