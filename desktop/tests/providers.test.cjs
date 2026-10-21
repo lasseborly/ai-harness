@@ -27,14 +27,14 @@ test('Large 4 bruger Mistrals adapter, kataloggrænser og listepris uden en perm
  assert.equal(engineProvider({kind:'compatible'}, {id:'mistral-large-4'}, 'http://127.0.0.1:1/v1','t').npm,'@ai-sdk/openai-compatible','egne servere beholder deres valgte protokol');
 });
 test('Corti og Mistral fastholder destination; ukendte udbydere afvises',()=>{
- for(const [kind,host] of [['corti','ai.eu.corti.app'],['mistral','api.mistral.ai']]) {
+ for(const [kind,host] of [['corti','ai.eu.corti.app'],['mistral','api.mistral.ai'],['alexandra','inference.alexandra.dk']]) {
   const c=normalize({kind,name:kind,baseURL:'https://example.invalid'});assert.equal(new URL(c.baseURL).hostname,host);
   assert.match(disclosure(c,{id:'test'}).price,/Ukendt/);
   assert.equal(engineProvider(c,{id:'test'},'http://127.0.0.1:1/v1','midlertidig').options.apiKey,'midlertidig');
  }
  assert.throws(()=>normalize({kind:'promte',name:'Promte',baseURL:'https://example.invalid'}),/understøttet/);
 });
-for(const kind of ['corti','mistral']) test(`${kind}: katalog, streaming, værktøjskald og fejl gennem rigtig HTTP-gateway`,async t=>{
+for(const kind of ['corti','mistral','alexandra']) test(`${kind}: katalog, streaming, værktøjskald og fejl gennem rigtig HTTP-gateway`,async t=>{
  const received=[];let fail=false;
  const server=http.createServer(async(req,res)=>{
   assert.equal(req.headers.authorization,'Bearer test-noegle');

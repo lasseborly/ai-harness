@@ -120,7 +120,7 @@ test('CLI viser kun nøgle og lokal AI; Komplai afvises før nøglelager og netk
   const menus = [], answers = ['key', 'other', null];
   ui.choose = async (_question, choices) => { menus.push(choices.map(c => c.value)); return answers.shift(); };
   assert.equal(await login(app), null);
-  assert.deepEqual(menus, [['key', 'ollama'], ['anthropic', 'mistral', 'corti', 'other'], ['openai', 'azure', 'openrouter', 'zen', 'compatible']]);
+  assert.deepEqual(menus, [['key', 'ollama'], ['anthropic', 'mistral', 'corti', 'alexandra', 'other'], ['openai', 'azure', 'openrouter', 'zen', 'compatible']]);
   await assert.rejects(login(app, 'komplai'), /kun til udgivelse/);
   assert.equal(unlocked, 0);
   assert.equal((await app.bench.store.read()).connections.length, 0);

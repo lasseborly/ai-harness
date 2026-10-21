@@ -16,7 +16,7 @@ async function login(app, kind) {
     if (!kind) return null;
   }
   if (kind === 'key') {
-    kind = await ui.choose('Vælg udbyder', [{ label: 'Claude', value: 'anthropic' }, { label: 'Mistral', value: 'mistral' }, { label: 'Corti', value: 'corti' }, { label: 'Vælg en anden', value: 'other' }]);
+    kind = await ui.choose('Vælg udbyder', [{ label: 'Claude', value: 'anthropic' }, { label: 'Mistral', value: 'mistral' }, { label: 'Corti', value: 'corti' }, { label: 'Alexandra', value: 'alexandra' }, { label: 'Vælg en anden', value: 'other' }]);
     if (kind === 'other') kind = await ui.choose('Vælg en anden udbyder', ['openai', 'azure', 'openrouter', 'zen', 'compatible'].map(value => ({ value, label: definitions[value].name })));
     if (!kind) return null;
   }

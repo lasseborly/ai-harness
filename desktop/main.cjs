@@ -522,6 +522,7 @@ const accountPages = {
   anthropic: { start: 'https://platform.claude.com/', billing: 'https://platform.claude.com/settings/billing', keys: 'https://platform.claude.com/settings/keys' },
   mistral: { start: 'https://console.mistral.ai/', billing: 'https://admin.mistral.ai/organization/billing', privacy: 'https://admin.mistral.ai/plateforme/privacy', keys: 'https://console.mistral.ai/api-keys' },
   corti: { start: 'https://console.corti.app/signup', console: 'https://console.corti.app/', keys: 'https://console.corti.app/corti-models' },
+  alexandra: { start: 'https://platform.alexandra.dk/platform-ui/', console: 'https://platform.alexandra.dk/platform-ui/', keys: 'https://platform.alexandra.dk/platform-ui/' },
   openrouter: { start: 'https://openrouter.ai/settings/keys' }, zen: { start: 'https://opencode.ai/auth' }
 };
 handle('connections:account', value => {
@@ -853,7 +854,7 @@ app.whenReady().then(async () => {
   protocol.handle('harness', async request => {
     const url = new URL(request.url);
     const name = url.pathname.slice(1);
-    const providerAsset = /^provider-(anthropic|azure|compatible|corti|komplai|mistral|ollama|openai|openrouter|zen|promte|github-pages|cloudflare|vercel)\.svg$/.test(name);
+    const providerAsset = /^provider-(alexandra|anthropic|azure|compatible|corti|komplai|mistral|ollama|openai|openrouter|zen|promte|github-pages|cloudflare|vercel)\.svg$/.test(name);
     if (url.host !== 'app' || (!providerAsset && name !== 'provider-cloudflare.png' && !['index.html', 'aura-icon.png', 'app.js', 'updates.js', 'workspace.js', 'plan-view.js', 'planning.js', 'approval-view.js', 'approvals.js', 'preview-edit.js', 'history.js', 'chats.js', 'palette.js', 'model-advice.js', 'connection-overview.js', 'chat-display.js', 'conversation-mode.js', 'live-work.js', 'server.js', 'viewport.js', 'share-view.js', 'hosting.js', 'deployment-setup.js', 'deployment.js', 'styles.css', 'demo.css'].includes(name))) return new Response('Ikke fundet', { status: 404 });
     return new Response(await fs.readFile(path.join(__dirname, 'ui', name)), { headers: { 'Content-Type': name === 'aura-icon.png' ? 'image/png' : providerAsset ? 'image/svg+xml' : name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html; charset=utf-8' } });
   });
