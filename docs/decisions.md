@@ -1,14 +1,99 @@
 # Produktretning og beslutninger
 
-## Alexandra som udbyder · 21. oktober 2026
+## Linux som desktopplatform · 21. oktober 2026
 
-Brugeren har bedt om at tilføje Alexandra Instituttets AI-platform som udbyder. Platformen er Chat Completions-kompatibel på `https://inference.alexandra.dk/v1` med Bearer-nøgle og understøtter streaming, værktøjskald og billedinput; Responses, embeddings, billede- og lydgenerering fravælges. Adapteren bruger derfor `@ai-sdk/openai-compatible` og platformens egen adresse uden alternativ.
+Brugeren har bedt om at gøre Linux til en målplatform for desktopappen. Vi distribuerer kun én filtype: et AppImage til `linux-x64` med glibc. AppImage kræver ingen installation eller rodrettigheder, virker på tværs af distributioner og er den form, electron-updater kan opdatere selv uden en pakkehåndterer. `.deb`, `.rpm` og `tar.gz` fravælges i denne beta; de kan tilføjes senere, hvis der er efterspørgsel.
 
-Vilkår kontrolleret på platformens dokumentation 21. oktober 2026: hele behandlingen foregår på danske lokationer hos ScanNet (team.blue Denmark), ISO 27001-certificeret, uden overførsel uden for EU/EØS. Prompts og svar slettes, når svaret er færdigt, og logges ikke; indhold bruges ikke til træning. Databehandleraftale foreligger.
+arm64 og musl-baserede systemer (fx Alpine) distribueres ikke. Runtime-låsen indeholder kun verificerede binære til x64, og vi har ingen afprøvningsmaskine til arm64. En forkert arkitektur ville give en app, der ikke starter, og et opdateringsfeed, ingen kan bruge.
 
-Priser og grænser hentes fra modelkortene: GLM 5.3 Flash 6/3/30 og Qwen 3.8 Flash Next 1/0,2/5 DKK pr. million tokens. Alexandras priser er i DKK, så `priceFor` bærer valutaen videre, og forbruget føres i en særskilt DKK-post, så USD og DKK ikke blandes. Kontekstvinduerne er modellernes; svargrænsen er platformens eget tal fra vejledningen til kodeagenter, fordi et unødigt højt `max_tokens` reserverer flere penge, før svaret skrives.
+Automatisk opdatering er inkluderet fra starten: AppImage-updatereren erstatter filen, når appen er startet fra en AppImage (miljøvariablen `APPIMAGE` er sat). Kører brugeren den udpakkede mappe fra en bygning, er opdatereren slået fra i stedet for at fejle. Filen er usigneret; der findes ingen fælles tillidskæde for Linux, som svarer til Apple-notarisation eller Authenticode, så udgivelsesnoterne og downloadsidens detaljer skal sige det uden omsvøb, og brugeren fjerner selv udflagsningen før første start.
 
-Alexandra føjes til de fire fremhævede udbyderkort og til forvalgt model, hvor udbyderens egen vejledning til kodeagenter bruger `glm-5.3-flash`. Qwen er markeret eksperimentel hos udbyderen og overtager aldrig standardvalget. Ikonet er et bogstavmærke tegnet af Aura, da instituttet kun udgiver et vandret logo; kilden står i `desktop/ui/provider-icons-LICENSE.txt`. Adgangen til den enkelte model styres af organisationen, så et katalogsvar beviser fortsat ikke modeladgang.
+Nøgleringen bruger systemets hemmelighedstjeneste via Electrons `safeStorage`, som på Linux kræver en Secret Service-tjeneste som GNOME Keyring. Electrons usikre `basic_text`-fallback med en fast offentlig adgangskode afvises i koden, så nøglen aldrig gemmes ukrypteret. Adgangen er afprøvet på en rigtig Linux-maskine med GNOME Keyring; CI's nøglering alene er ikke bevis nok.
+
+## Promte før login · til 0.5.0-beta.3 · 22. oktober 2026
+
+En tester loggede ind hos Promte, valgte app og fik så "Promte-kildekoden mangler en gyldig package.json." Promte tager kun imod React-apps, som Promte selv bygger med sin faste Vite-opsætning. Aura starter derimod et nyt projekt som en neutral pladsholder i `public/`, og AI'en vælger teknik efter opgaven: HTML/CSS til en enkel side, React med TypeScript til en interaktiv app og Python eller Node.js til en backend. Et almindeligt Aura-projekt er derfor ikke en Promte-app, før det er bygget som en. Promte-integrationen, som giver AI'en Promtes regler, er slået fra som standard.
+
+Brugeren valgte, at Udgiv fanger det før login, forklarer det i almindeligt dansk og tilbyder at gøre projektet klar til Promte eller vælge en anden udbyder. Kontrollen bruger Promtes egne regler fra adapteren på projektets filer på computeren. Gør projektet klar slår Promte-integrationen til for netop dette projekt og lægger en besked i skrivefeltet i Planlæg. Intet sendes automatisk, og en kladde, brugeren selv har skrevet, bevares. Aura omskriver ikke selv projektet og ændrer ikke Promtes byggekontrakt.
+
+## Alle projekter i sidepanelet · til 0.5.0-beta.3 · 22. oktober 2026
+
+Sidepanelet viste højst de 12 senest åbnede projekter, og grænsen sad i kernen (`recent()`). Et 13. projekt forsvandt derfor helt fra sidepanelet og paletten og kunne ikke åbnes fra listen, selv om dets samtaler stadig var gemt. Nu husker kernen alle projekter, appen har åbnet. Sidepanelet viser de 12 senest åbnede og resten bag "Vis alle N projekter", ligesom samtalelisten gør. Paletten søger i alle.
+
+Brugeren valgte ikke at scanne Dokumenter/Aura. Listen viser kun projekter, som netop denne installation har åbnet eller oprettet. Projekter kan ligge andre steder, og en scanning ville vise nogle og skjule andre tilfældigt. Projekter fra en anden installation, en kørsel fra kildekoden eller en prøve med egne appdata åbnes med **Åbn projekt**.
+
+## Svarloft, indsats og komprimering · til 0.5.0-beta.3 · 22. oktober 2026
+
+En tester fik "AI'en stoppede uden et resultat – Svaret blev for langt" med Cortis corti-s1 (GLM 5.3) efter en lang samtale. Årsagen er, at OpenCode 1.x sender højst 32.000 tokens pr. svar (`Math.min(limit.output, 32000)`). En tænkende model kan bruge hele loftet på at tænke. Det gælder også den nyeste 1.x (1.19.4). OpenCode 2 sætter intet sådant loft, men skiftet til 2 venter til en senere beta og undersøges for sig.
+
+Brugeren har valgt:
+- **Grænser:** Loftet pr. svar følger modellens dokumenterede maksimum. Kataloget har forrang, og ellers bruges udbydernes dokumentation med kilde og dato i `core/connections.cjs`. Ukendte modeller beholder et forsigtigt loft.
+- **Fejlvalg:** Fejlkortet viser valg, og intet sendes uden et klik.
+- **Omfang:** Det gælder alle udbydere.
+
+Det betyder:
+- **OpenCodes loft** hæves med `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX` til Auras højeste svarloft, 128.000 (Claude og GPT-5). Modellens egen grænse i opsætningen bestemmer.
+- **Grænser pr. model:**
+  - Claude 5-familien og Opus/Sonnet 4.6+ får 128.000 (Anthropics Models API oplyser selv `max_tokens`).
+  - GPT-5 får 128.000, og o-modellerne får 100.000.
+  - corti-s1 får 128.000. Corti dokumenterer intet loft, men tog imod `max_tokens` op til hele konteksten 22. oktober.
+  - Alexandra beholder sit anbefalede 16.384, og Mistral beholder Auras 32.000.
+  - Lokale Ollama-modeller får halvdelen af konteksten.
+  - Ukendte tænkende modeller får 32.000, og øvrige ukendte 4.096.
+- **Komprimering:** Samtaler komprimeres ved 200.000 tokens (`limit.input`), også for modeller med 1M kontekst. Kald bliver ikke dyrere og langsommere, og en tænkende model får mindre at tænke over. Claude havde allerede dette valg.
+- **Fejlkortet** tilbyder højst tre valg, når svaret stopper ved loftet:
+  - "Prøv igen med lav indsats", når modellen tager imod `low`.
+  - "Gør samtalen kortere og prøv igen", når samtalen har mere end én besked.
+  - "Prøv igen".
+- **Indsatsen:** En valgt indsats står under skrivefeltet og kan nulstilles under modellen. Den sendes som udbyderen forventer, kun når brugeren har valgt den, og den starter ikke en ny modelsession.
+- **Ny samtale med planen blev til komprimering:** Brugeren valgte "Ny samtale med planen" i forslaget. Den er bygget som "Gør samtalen kortere" (OpenCodes `summarize`), fordi planen bor i samtalen. Komprimeringen bevarer plan, historik og filer uden at flytte noget.
+- **Tænkende modeller markeres ikke for OpenCode.** I 1.18 styrer markeringen kun OpenCodes egne indsatsvarianter, som Aura ikke bruger. Aura bruger selv oplysningen om tænkning og indsats fra Cortis og OpenRouters kataloger og fra tabellen.
+
+Afvejning: Et svar, der rammer det højere loft, koster mere end før. For corti-s1 er det omkring 1 USD ved 128.000 tokens mod omkring 0,26 USD ved 32.000. Til gengæld får modellen plads til at blive færdig. Lav indsats er den billige vej. Den 22. oktober tænkte corti-s1 ikke med `reasoning_effort: "low"` og svarede stadig rigtigt.
+
+## Alexandra som fjerde ligestillede udbyder · til 0.5.0-beta.2 · 22. oktober 2026
+
+Brugeren har valgt at vise Alexandra Instituttets AI-platform som fjerde fremhævede udbyderkort ved siden af Claude, Mistral og Corti, både i appen og i Aura-terminalen. Reglen i `AGENTS.md` er ændret til fire ligestillede valg; øvrige udbydere ligger fortsat bag "Vælg en anden". Ingen udbyder anbefales.
+
+Ændringen er porteret fra Lasse Borlys PR #13. Platformen er Chat Completions-kompatibel på `https://inference.alexandra.dk/v1` med Bearer-nøgle. Vilkårene er kontrolleret på platformens egen dokumentation 21. oktober 2026: behandling på danske lokationer hos ScanNet (team.blue Denmark), ingen overførsel uden for EU/EØS, prompts og svar slettes efter svaret og logges ikke, og indhold bruges ikke til træning. Priserne er i DKK pr. million tokens og føres i en særskilt DKK-post. Standardmodellen `glm-5.3-flash` står som Alexandras eget udgangspunkt til kodeagenter; den eksperimentelle Qwen-model bliver aldrig standard. Ikonet er et bogstavmærke tegnet til Aura.
+
+PR'en fandt også, at den første besked i Samtale, som er standardtilstanden, fejlede, før visningen "Før du sender" åbnede, fordi arbejdsmåden manglede i oversigten. Fejlen rammer alle udbydere i 0.4.0-beta.1 og 0.5.0-beta.1 og rettes i beta.2. Under porteringen er Alexandras ikon desuden tilføjet appens liste over tilladte udbyderikoner.
+
+## Udgiv i stedet for Del, Corti EU-S og Promte-installationer · til 0.5.0-beta.2 · 22. oktober 2026
+
+Brugeren har valgt ét ord for at lægge en app ud til andre: **Udgiv**. Knappen, funktionen (Udgivelse), forløbet, fejlbeskeder, agentens vejledning og skills bruger det. Interne id'er som `deling` er uændrede, så gemte indstillinger bevares. komplais og Promtes forløb forbliver forskellige, så længe de ligner hinanden; kun ordene er ensrettet.
+
+Corti-nøgler fra projekter i EU-S (Sovereign), som KL-hackathonens, begynder med `eu-s:` og bruger `https://ai.eu-s.corti.app/v1`. EU-S står i Cortis konsol, ikke i dokumentationen; adressen er slået op 22. oktober og drives hos Scaleway i Frankrig ifølge IP-registeret. Afprøvet live med hackathonens nøgle: modelliste, Samtale, Planlæg og Byg.
+
+Promte-integrationen fra PR 12 er lavet til installationer, der selv bygger kildekoden, fx kodning.promte.dk. En installation, der kun tager imod færdigbyggede apps (`uploadMode: built`, fx promte.kalundborg.dk), får nu en klar besked, og en installation uden appliste beder om arbejdsområdets ID med en forklaring. Aura tilføjer ikke færdigbyggede uploads til Promte.
+
+## React-apps til komplai Run · lokal bygning · til 0.5.0-beta.2 · 22. oktober 2026
+
+Brugeren har valgt, at Aura og ikke komplai bygger apps med et byggetrin, og at begge veje findes: Udgiv bruger en gemt byggemappe med `index.html`, ellers tilbyder Aura at bygge appen lokalt i en isoleret kopi af den gemte version efter brugerens ja, og uploader det byggede. komplai bygger intet, så fremmed kode køres aldrig på komplais servere.
+
+Kravene: ingen nye installationer og ingen administratorrettigheder. Bygningen bruger Auras medfølgende Node og npm, kører i en midlertidig mappe under brugerens konto og uden pakkernes installationsscripts. Det, der virkede før, virker uændret: statiske apps udgives som hidtil, gemte opsætninger beholder deres mappe, og **Vælg en mappe i stedet** står altid ved bygningen. Promte (kodning.promte.dk) er uændret; dér bygger Promte selv. Afprøvet live 22. oktober med en React-app med Vite, bygget af Aura og udgivet til en eksisterende privat testapp i komplai Run.
+
+## komplai Run i forhåndsvisningen og offentlige apps · til 0.5.0-beta.2 · 22. oktober 2026
+
+Brugeren har valgt, at komplai Run får samme opbygning som Promte i forhåndsvisningen, med Hub som den, der svarer. Aura kopierer ikke komplais kode: forhåndsvisningen henter komplais officielle app-SDK fra Hub og sender SDK'ets kald gennem Aura. Hub giver en forhåndsvisning af personens egen app, også før udgivelse, med rigtig identitet, AI som personens egen Chat og Redact og gemte data i en særskilt, krypteret tabel. Brugeren har udtrykkeligt godkendt, at den native udgivelsesadgang må starte en sådan forhåndsvisning. Integrationen er slået fra som standard, og en app oprettes først efter brugerens klik.
+
+Del beholder valget **Alle med linket** for nye apps med bekræftelse ved appens navn. komplai afviser at oprette offentlige apps direkte, så Aura opretter appen for organisationen og gør den offentlig med bekræftelsen før første upload.
+
+komplai-loginet i Del viser kun **Log ind med komplai**. Brugeren har fravalgt "Kræver konto og betalt aftale" og linket "Få adgang til komplai", fordi det lød som salg. Udbyderlisten skriver "Kræver komplai-konto" som de andre udbydere, og fejlbeskeder beder om adgang hos jeres administrator i stedet for at kontakte komplai. Promtes tekster er uændrede.
+
+Ændringerne hører til beta.2 sammen med den altid synlige Del-knap. komplai-delen releases af komplai og afprøves derefter mod den rigtige tjeneste.
+
+## Promte i forhåndsvisningen · komplai Run efter beta.1 · 21. oktober 2026
+
+Brugeren har flettet PR 12 med Promte-login, appvalg og forhåndsvisning med rigtige data ind i 0.5.0-beta.1. Forhåndsvisningen svarer kun en Promte-app, når Promte-integrationen er slået til. Aura opretter først en app i Promte, når brugeren vælger **Opret appen … i Promte**. Del er forudfyldt med `https://kodning.promte.dk`, som Promte selv foreslog i PR 12 (valgt 22. oktober til beta.2; i beta.1 var det `https://app.promte.dk`); en anden installation angives af brugeren. Forhåndsvisningen bruger projektets koblede app, den Promte, brugeren er logget ind på i Aura, ellers samme adresse.
+
+komplai Run skal have en tilsvarende opbygning efter beta.1. Arbejdet begynder med at afklare, hvilke app-API'er komplai stiller til rådighed; Run er i dag statisk hosting uden data eller AI-proxy. Det er ikke implementeret.
+
+## Del er altid synlig · aftalt til 0.5.0-beta.2 · 20. oktober 2026
+
+Brugeren har valgt, at Del-knappen altid skal være synlig, også når der endnu ikke er en app at dele. Den eksisterende udgivelsesgennemgang og brugerens godkendelse bevares.
+
+Implementeret i beta.2 22. oktober 2026: Er deling slået fra, viser Del ét trin, **Slå deling til**. Derefter starter det almindelige Del-forløb, også før appen har en gemt version, så login, app og adgang kan gøres klar, mens appen bygges. Brugeren fravalgte et særskilt trin "Der er endnu intet at dele". Først ved udgivelse kræves en gemt version, og Aura siger det med én sætning.
 
 ## komplai kun til udgivelse · 20. oktober 2026
 

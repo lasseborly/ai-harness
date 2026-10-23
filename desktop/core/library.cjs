@@ -139,6 +139,8 @@ async function loadLibrary(profileRoot) {
   for (const entry of catalog.skills) {
     if (names.has(entry.name)) throw new Error(`Skill ${entry.name} står flere gange i kataloget.`);
     names.add(entry.name);
+    // Navnet skal kunne afvises, før mappen læses: på følsomme filsystemer findes 'Harness-A' ikke som 'harness-a'.
+    if (!NAME.test(entry.name) || entry.name.length > 64) throw new Error(`Skill ${entry.name}: Navnet skal bestå af små bogstaver, tal og bindestreger og højst have 64 tegn.`);
     const files = await readSkillFiles(path.join(profileRoot, 'skills', entry.name));
     skills.push({ ...entry, ...validateSkill(entry, files), files });
   }

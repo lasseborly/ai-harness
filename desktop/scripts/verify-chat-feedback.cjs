@@ -78,7 +78,9 @@ const helpers = require('./ui-test-helpers.cjs');
     assert.match(await page.locator('#usage-status').textContent(), /20.*10/);
     const instructions = JSON.stringify(requests[0].messages);
     assert.match(instructions, /Python med FastAPI/); assert.match(instructions, /Node.js med TypeScript/);
-    assert.match(instructions, /Vercel og Azure Static Web Apps/); assert.match(instructions, /vejledninger er ikke uploadintegrationer/);
+    // Udgivelsesvejledningen fra core/hosting-guidance.cjs når modellen uændret. Udgivelse er ikke slået til i prøven.
+    assert.ok(instructions.includes(JSON.stringify(require('../core/hosting-guidance.cjs').guidance(false)).slice(1, -1)), 'hostingvejledningen står i modelkaldet');
+    assert.match(instructions, /Azure Static Web Apps, Cloudflare Pages, GitHub Pages, komplai Run, Promte Apps og Vercel/); assert.match(instructions, /Netlify Drop har vejledning, men ingen uploadintegration/);
     assert.match(instructions, /pladsholder, ikke et vedtaget design/);
     assert.deepEqual(errors, []);
     console.log(JSON.stringify({ status: 'bestået', root, requests: requests.length, checks: ['mappeadgang', 'synlig opstart', 'lang tavshed', 'rigtig streaming', 'fire farveformater', 'HTML som tekst', 'manuel rulning', 'seneste svar', 'reduceret bevægelse', 'faktiske tokens', 'Python/Node/hosting i modelkald'] }));

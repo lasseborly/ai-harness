@@ -13,6 +13,8 @@ const http = require('node:http');
   await fs.mkdir(path.join(project, 'public'), { recursive: true }); await fs.mkdir(other);
   await fs.writeFile(path.join(project, 'public/index.html'), '<h1>Før bygning</h1>');
   const requests = []; let catalogs = 0;
+  // En plan tæller kun med alle fire afsnit; ellers bliver svaret i samtalen uden plan.
+  const plan = '## Det bygger vi\nEn overskuelig side om fælleshuset.\n## Sådan skal det se ud\nEn tydelig overskrift og en tilmeldingsknap.\n## Teknik og data\nHTML i public/index.html.\n## Det skal du prøve\nPrøv overskriften og tilmelding på mobil.';
   const server = http.createServer(async (req, res) => {
     if (req.url === '/v1/models') { catalogs++; res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify({ data: [{ id: 'test-model' }] })); }
     let raw = ''; for await (const chunk of req) raw += chunk;
@@ -24,7 +26,7 @@ const http = require('node:http');
     }
     const planning = JSON.stringify(body.messages).includes('PLANLÆGNING:');
     const tool = !planning && body.tools?.length && !body.messages.some(m => m.role === 'tool') ? { id: 'resume_write', type: 'function', function: { name: 'write', arguments: JSON.stringify({ filePath: path.join(project, 'public/index.html'), content: '<h1>Fælleshuset er klar</h1><button>Tilmeld</button>' }) } } : null;
-    const chunk = { id: 'resume', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta: tool ? { role: 'assistant', tool_calls: [{ index: 0, ...tool }] } : { role: 'assistant', content: planning ? 'Forslag: En overskuelig side om fælleshuset. Prøv overskriften og tilmelding på mobil.' : 'Siden er ændret. Prøv tilmeldingsknappen.' }, finish_reason: null }] };
+    const chunk = { id: 'resume', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta: tool ? { role: 'assistant', tool_calls: [{ index: 0, ...tool }] } : { role: 'assistant', content: planning ? plan : 'Siden er ændret. Prøv tilmeldingsknappen.' }, finish_reason: null }] };
     res.setHeader('content-type', 'text/event-stream');
     res.write('data: ' + JSON.stringify(chunk) + '\n\n');
     res.write('data: ' + JSON.stringify({ ...chunk, choices: [{ index: 0, delta: {}, finish_reason: tool ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 } }) + '\n\n'); res.end('data: [DONE]\n\n');
@@ -84,7 +86,7 @@ const http = require('node:http');
     await page.click('#accept-send'); await page.locator('#run-status').filter({ hasText: 'Klar' }).waitFor({ timeout: 60000 });
     assert.ok(requests.some(r => JSON.stringify(r.messages).includes('Tidligere samtale, som brugeren har valgt') && JSON.stringify(r.messages).includes('violet-cykel')));
     // Ny samtale starter en tom samtale ved siden af den gamle, som bevares i sidepanelet; projektfilerne er uændrede.
-    await page.click('#new-conversation'); await page.waitForFunction(() => document.querySelector('#messages').textContent === '');
+    await page.click('#project-list .project-entry.is-current .project-add'); await page.waitForFunction(() => document.querySelector('#messages').textContent === '');
     assert.equal(await page.inputValue('#prompt'), ''); assert.equal(await page.isVisible('#plan-card'), false);
     const state = await page.evaluate(() => window.harness.connectionState()); assert.equal(state.value.workspace.messages.length, 0);
     const storage = path.join(root, 'appdata', 'harness', 'workspaces');

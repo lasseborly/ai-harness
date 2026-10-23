@@ -1,8 +1,8 @@
 # Komplai Run i andre kodeværktøjer
 
-Kontrolleret 18. oktober 2026 mod det offentligt hentede udgivelseskit, version 0.1.0, og Komplais dokumentation om Aura-login og appadresser. Kittets CLI er MIT-licenseret og kræver Node 22.15 eller nyere. Denne reference medtager ingen af dets scripts.
+Kontrolleret 22. oktober 2026 mod komplais udgivelseskit, version 0.2.1, med app-SDK'ets API-beskrivelse, og komplais dokumentation om Aura-login og appadresser. Kittets CLI er MIT-licenseret og kræver Node 22.15 eller nyere. Denne reference medtager ingen af dets scripts.
 
-Dette terminalforløb gælder kodeværktøjer uden for Aura. I Auras desktopapp bruges **Del**; agentens kommandoværktøj må ikke stå for upload. Aura-terminalens `/deploy` understøtter kun Vercel og Azure Static Web Apps. Forbered Run-filerne til brugerens manuelle upload i Hub, og omgå ikke Auras godkendelser med kommandoerne her.
+Dette terminalforløb gælder kodeværktøjer uden for Aura. I Auras desktopapp bruges **Udgiv**; agentens kommandoværktøj må ikke stå for upload. Aura-terminalens `/deploy` understøtter kun Vercel og Azure Static Web Apps. Forbered Run-filerne til brugerens manuelle upload i Hub, og omgå ikke Auras godkendelser med kommandoerne her.
 
 ## Adgang til en eksisterende app
 
@@ -17,14 +17,24 @@ Brugeren sætter `KOMPLAI_PUBLISH_TOKEN` i værktøjets private miljø eller ind
 Brug den versionsfaste kommando, Hub viser for appen. Det offentlige kit beskriver denne form; erstat uploadadressen med appens faktiske adresse fra Hub:
 
 ```sh
-npx --package=https://hub.komplai.dk/komplai-publish/komplai-publish-0.1.0.tgz komplai-publish ./dist --endpoint https://hub.komplai.dk/api/publish/APP_UUID/releases --dry-run
+npx --package=https://hub.komplai.dk/komplai-publish/komplai-publish-0.2.1.tgz komplai-publish ./dist --endpoint https://hub.komplai.dk/api/publish/APP_UUID/releases --dry-run
 ```
 
-`./dist` skal være den færdigbyggede mappe, ikke en antagelse om projektets mappestruktur. `--dry-run` uploader intet. Kontrollér de faktiske filer og deres henvisninger i browseren; et filantal eller et vellykket pakkecheck beviser ikke, at appen virker. npm-registrering af `@komplai/publish` er ikke verificeret her, så brug ikke den kortere registreringsbaserede kommando som forudsætning.
+`./dist` skal være den færdigbyggede mappe, ikke en antagelse om projektets mappestruktur. `--dry-run` uploader intet, kræver ingen nøgle og kontrollerer også appens `komplai.json`, som Run gør. Kontrollér de faktiske filer og deres henvisninger i browseren; et filantal eller et vellykket pakkecheck beviser ikke, at appen virker. npm-registrering af `@komplai/publish` er ikke verificeret her, så brug ikke den kortere registreringsbaserede kommando som forudsætning.
 
 Når udgivelsen til den konkrete app er godkendt, fjernes `--dry-run`. CLI'en viser målet og spørger før upload. `--yes` må kun bruges, når denne udgivelse allerede er godkendt og projektets regler tillader den. Kommandoen kan også modtage en færdig HTML-fil eller ZIP.
 
 Til manuel upload kan samme versionsfaste CLI bruges med `pack ./dist --out app.zip`. Det pakker kun lokalt; brugeren uploader derefter ZIP-filen i Hub. `init --endpoint …` gemmer kun uploadadresse og outputmappe i `.komplai-publish.json`, aldrig nøglen. Læs en eksisterende konfiguration før ændringer.
+
+## Afprøv SDK-kald lokalt
+
+Med samme pakkeadresse og `dev` i stedet for `--endpoint` serveres den færdige mappe på `http://localhost:5180`, som Run gør, med samme SDK, ruter og indholdspolitik:
+
+```sh
+npx --package=https://hub.komplai.dk/komplai-publish/komplai-publish-0.2.1.tgz komplai-publish dev ./dist
+```
+
+Kommandoen kører, til den stoppes; start den i baggrunden, og stop den efter afprøvningen. En stand-in svarer i stedet for komplai: alle erklærede brug tæller som godkendt, personen hedder Udvikler og er administrator (`--member` gør personen til almindeligt medlem), og gemte data ligger kun i hukommelsen. Hver browser kan logge ind som sin egen person på `/_komplai/dev`; et privat vindue kan være person nummer to. Redact finder kun mønstre. AI kræver en personlig API-nøgle i `KOMPLAI_API_KEY` i værktøjets private miljø; bed aldrig om den i chatten. Afvisninger skrives i terminalen. En bestået lokal prøve viser ikke, at brugen er godkendt i Run.
 
 ## Filer og grænser
 
@@ -47,7 +57,7 @@ HTTP 200 indeholder appens `id` og `activeRelease`. Kontrollér, at app-id'et sv
 
 ## Kilder og afprøvningsstatus
 
-- [Komplais offentlige udgivelseskit](https://hub.komplai.dk/komplai-publish/komplai-publish.zip): `SKILL.md`, `API.md`, README og CLI 0.1.0.
+- [komplais udgivelseskit](https://hub.komplai.dk/komplai-publish/komplai-publish.zip): `SKILL.md`, `API.md` med app-SDK'et, README og CLI 0.2.1.
 - [Run og terminalvejledning i Hub](https://hub.komplai.dk/publish?guide=1).
 
 Kilderne beskriver kontrakten. At kittet kan hentes, eller at skillen installeres korrekt, dokumenterer ikke et gennemført login, native upload eller adgangskontrol i produktion. Angiv disse som uafprøvede, indtil der er konkret evidens for det relevante miljø.

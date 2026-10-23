@@ -60,7 +60,7 @@ async function scenario(surface, mode) {
     const tools = main.at(-1).messages.filter(message => message.role === 'tool').map(message => JSON.stringify(message.content));
     assert.match(tools[0], /skill_content/); assert.ok(tools[0].includes(reference)); assert.match(tools[1], /WCAG/);
     assert.match(tools[2], /not found/);
-    if (surface === 'cli') { assert.match(system, /\/save/); assert.doesNotMatch(system, /appens Del-knap|Auras knap Del|Start forhåndsvisning/); }
+    if (surface === 'cli') { assert.match(system, /\/save/); assert.doesNotMatch(system, /appens Udgiv-knap|Auras knap Udgiv|Start forhåndsvisning/); }
     else assert.match(system, /APPENS REGLER/);
     assert.equal(await fs.readFile(path.join(project, 'AGENTS.md'), 'utf8'), own + 'NY-REGEL\n');
     const previousSession = bench.chat.engine.session.id;

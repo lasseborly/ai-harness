@@ -1,16 +1,157 @@
 # Teststatus før invitation
 
-Senest kontrolleret 21. oktober 2026. Afsnittene er daterede, så tidligere begrænsninger kan læses i deres sammenhæng. Dette er status for den aktuelle arbejdsmappe, ikke en erklæring om, at alle installationsfiler eller modeller er klar. Særskilt godkendte Git-handlinger, udgivelser og GitHub-kørsler fremgår af de enkelte afsnit.
+Senest kontrolleret 23. oktober 2026. Afsnittene er daterede, så tidligere begrænsninger kan læses i deres sammenhæng. Dette er status for den aktuelle arbejdsmappe, ikke en erklæring om, at alle installationsfiler eller modeller er klar. Særskilt godkendte Git-handlinger, udgivelser og GitHub-kørsler fremgår af de enkelte afsnit.
 
 [Gennemgangen før offentlig beta](offentliggoerelse.md) samler historik- og logkontrol samt de lokale prøver af README, hjemmeside og udgivelseskontrol. Den offentliggør ikke appen og ændrer ikke installationsstatus nedenfor.
 
-## Alexandra med rigtig model · 21. oktober 2026
+## Linux som desktopplatform · 21. oktober 2026
 
-**Afprøvet på Linux med OpenCode 1.18.33 og `npm run test:live-app`:** `glm-5.3-flash` gennem appen med brugerens nøgle indtastet direkte i det isolerede Aura-vindue. Prøven bestod alle fem checks: planen ændrede ingen filer, den byggede side filtrerede korrekt ved 1, 5, 9 og 99 deltagere også i mobilvisning, AI-rettelsen ændrede overskriften og bevarede funktionen, Fortryd genskabte projektfilerne byteidentiske, og preview virkede igen bagefter. Ingen rendererfejl. Hele samtalen kostede ca. 1,1 DKK (12 kald, 42.872 input- og 10.518 svartokens, 179.008 cache-læsninger).
+**Bygget og afprøvet på en Linux-maskine med X11 og GNOME Keyring.** `npm run package:linux` fremstiller `Aura-0.4.0-beta.1-linux-x64.AppImage` (323 MB) og `release/linux-unpacked`. AppImage'en er usigneret, som beslutningen beskriver.
 
-- **Rettet undervejs — første afsendelse i Samtale:** `showData` manglede `chat` i oversigten over arbejdsmåden, så den første besked i standardtilstanden fejlede med en uforståelig besked, før datavisningen åbnede. Ingen prøver fangede det, fordi alle skifter til Planlæg før afsendelsen. Fejlen er fra samtaletilstandens indførelse 15. oktober og rammer alle udbydere; nu vises »Samtale« korrekt.
-- **Prøvens egen robusthed:** `test:live-app` stiller nu eksplicit på Planlæg før første send, skelner AI'ens midlertidige fejl i egne preview-filer fra appfejl, og tæller prøvens egen policy-afvisning af værktøjer uden for `public/` som det forløb, den er, når modellen kommer videre.
-- **Modelbemærkning:** ét byggekald endte i gentagelse uden indhold til grænsen på 16.384 svartokens og gav ingen filændringer. Genkørslen byggede korrekt. Appens fejlvejledning viste vejen videre, som designet.
+- **Pakkeprøven:** `npm run test:package -- release/linux-unpacked/Aura` består. Udgivelseskontrakten, tests for opdateringsfeeds og tests for udgivelsessiden kræver nu også AppImage-filen og `beta-linux.yml`; de løber lokalt.
+- **Hele testsuiten:** `npm test` i `desktop` giver 345/345 på Linux.
+- **Gennemgående forløb:** `npm run test:recovery` og `npm run test:live-app -- --controlled` (styret af mock-motoren) består på Linux. De to prøver fejlede først, og det viste sig at være to forskellige fejl, der intet havde med Linux at gøre: mockplanerne var forældede, så plan-kortet aldrig dukkede op, og en rigtig fejl i appen.
+- **Rettet undervejs — genbrug af død forbindelse efter motorgenstart:** OpenCode binder altid port 4096. Når motoren lukkes og startes igen, kan appens HTTP-klient genbruge den døde keep-alive-forbindelse til den gamle proces, så det første kald får ECONNRESET, og opgaven fejler, før den overhovedet når motoren. Fejlen rammer alle platforme. Appen forsøger nu ét nyt læsekald, når et GET-kald fejler på netværksniveau; et skrivende kald sendes aldrig to gange.
+- **Nøglering:** Gemt og læst AI-nøgle via GNOME Keyring i den kørende app. Fejlbeskeden, når nøgletjenesten er låst, er stadig tydelig.
+- **Ikke afprøvet lokalt:** CI-opstillingen med Xvfb, D-Bus og `gnome-keyring-daemon` i `desktop-packages`-kørslen. Maskinen her har verken `sudo` eller Xvfb, så bootstrap-afsnittet er skrevet efter dokumentationen og skal bekræves af den første GitHub-kørsel. AppImage-filen er ikke prøvet på en anden distribution end den lokale.
+- **Manuel restopgave:** `desktop/scripts/verify-updates.cjs` kan ikke afprøve en AppImage-opdatering lokalt, fordi der ikke findes et ældre udgivet feed. Kontrollen er lavet som kode og feedkontrakt; den faktiske selvopdatering skal prøves, når den næste Linux-udgivelse ligger i en kladde.
+
+## Offentlig desktopbeta 0.5.0-beta.3 · 23. oktober 2026
+
+**Udgivet og observeret:** [Aura 0.5.0-beta.3](https://github.com/ai-alliancen-org/ai-harness/releases/tag/v0.5.0-beta.3) og [downloadsiden](https://ai-alliancen-org.github.io/ai-harness/desktop.html) er offentligt tilgængelige uden GitHub-login. Letvægtstagget `v0.5.0-beta.3` peger på brugerens commit `4a265745e40dfe98c4ce267e69f5d88b3dea479a` (`klargør Aura v0.5.0-beta.3 med Promte før login, robust notarisering og opdaterede prøver`), som også var `main`, da workflowet startede. Udgivelsen er oprettet af bjornSkalkam.
+
+- **Før upload:**
+  - Alle tre pakker består `verify-package-source.cjs` mod commit `4a26574`: 105 appfiler, 32 profilfiler og de fastlåste værktøjer.
+  - Windows-installationsfilens indhold er identisk med `win-unpacked` (2534 filer, samme SHA-256).
+  - `test:package` består for den pakkede Apple Silicon-app.
+- **Apple:**
+  - Seks indsendelser blev sendt én ad gangen over wi-fi med den nye `notarize.cjs`. Alle blev godkendt uden netudfald eller gentagelse: første DMG arm64 `47b4c016…` og Intel `8c17a1c4…`, derefter endelig arm64-DMG `d3aaf0e0…`, arm64-ZIP `4e6a1b0b…`, Intel-DMG `14ff8e27…` og Intel-ZIP `a978ad68…`.
+  - Slutkontrollen bekræfter signaturer, billetter på appen, distributionskontrol, kvitteringer og samme app i DMG og ZIP (5540 filer) for begge Mac-typer.
+  - Intel-slutkontrollen fejlede første gang. Kontrollen sammenligner med arbejdsmappen, og den havde allerede ændringer til næste version. Begge slutkontroller er derfor kørt igen mod en ren kopi af `4a26574` og består. Pakkerne var uændrede.
+- **Installation:** Den notariserede arm64-DMG er installeret i Programmer på en Mac med en eksisterende datamappe. Gatekeeper godkender den som "Notarized Developer ID", og appen startede med det eksisterende projekt og den gemte forbindelse.
+- **Kladde og offentliggørelse:**
+  - Kladden fik præcis de syv filer fra `desktop/release/0.5.0-beta.3/downloads/`, alle med status `uploaded` og samme størrelse som de lokale filer.
+  - Kun de to godkendte kørsler er startet: [Offentliggør gennemgået desktopbeta 39863366719](https://github.com/ai-alliancen-org/ai-harness/actions/runs/39863366719) og [Udgiv downloadside 39863559002](https://github.com/ai-alliancen-org/ai-harness/actions/runs/39863559002). Begge er gennemført.
+- **Efter offentliggørelse:**
+  - Downloadsiden viser v0.5.0-beta.3.
+  - Opdateringsfeeds for darwin-arm64, darwin-x64 og win32-x64 viser 0.5.0-beta.3 med `critical: false`.
+  - Alle fem filer er hentet uden login. SHA-256 matcher `SHA256SUMS.txt`, feedenes SHA-512 matcher de hentede filer, og den hentede arm64-DMG består `stapler validate`.
+- **Kendt begrænsning fundet efter udgivelsen:** Forhåndsvisningen af `public/` henter intet fra internettet. AI'en får det ikke at vide og kan derfor skrive en side, der henter React fra et CDN. Siden viser så kun sin egen reservetekst. Det rettes i 0.6.0-beta.1.
+- **Ikke afprøvet:** Opdatering fra 0.5.0-beta.2 gennem appens opdateringsfunktion, Windows-installation, fysisk Intel-Mac og installation på en separat, ren computer.
+
+## Kandidat til 0.5.0-beta.3 · kildekode · 22. oktober 2026
+
+Arbejdsmappens kode kørt fra kilden med Auras egen Node 22. Ikke en pakket app; pakker, Apple-notarisering og platformsprøver er hverken bygget eller kørt.
+
+- **Samlet kørsel:** 401 enhedsprøver og 45 Electron-forløb består efter hinanden. Udeladt er prøverne mod rigtige tjenester (`verify-live-*`) og prøverne, der kræver byggede pakker eller en udgivelsesmappe (`verify-package`, `verify-package-source`, `verify-download`, `verify-upgrade`, `verify-demo-web` og `verify-generated-preview`).
+- **De otte ældre prøver** `agent`, `chat-feedback`, `chat`, `desktop`, `planning`, `recovery`, `resume` og `versions` er tilpasset Samtale som standard, planens fire afsnit og Udgiv-forløbet. De består.
+- **Svarloft:**
+  - `verify-output-limit` med en lokal Corti-lignende server: OpenCode sender `max_tokens` 128.000, der sendes ingen indsats uden brugerens valg, og en ukendt indsats afvises. Fejlkortet viser tre valg, lav indsats sendes som `reasoning_effort`, og samtalen sammenfattes før genforsøget.
+  - Mod rigtigt materiale: ét almindeligt kald gennem Aura til corti-s1 med KL-hackathonens EU-S-nøgle. Alle tre modelkald fik `max_tokens` 128.000 uden indsats, og svaret var rigtigt.
+  - Lav indsats er ikke afprøvet gennem appen mod Corti. Corti tog imod `reasoning_effort: "low"` i et direkte kald samme dag.
+- **Projektlisten:** `verify-project-list` med 14 projekter: de 12 seneste først, **Vis alle 14 projekter**, paletten, åbning af det ældste og genstart. Prøven fejler med den gamle grænse på 12.
+- **Promte før login:**
+  - `verify-promte-ready`: forklaringen og de to valg vises før login, og intet Promte-login røres. **Gør projektet klar** slår integrationen til for projektet alene og lægger beskeden i Planlæg uden at sende den. En egen kladde bevares, og en Promte-app går direkte til login. Prøven fejler uden kontrollen.
+  - Kontrollen er kørt på en kopi af et rigtigt Aura-projekt og fanger det. Gennemgangens fejltekst er nu den samme forklaring med den tekniske årsag til sidst.
+  - Omlægningen af et projekt til en Promte-app og en rigtig upload til kodning.promte.dk er ikke afprøvet.
+- **Notarisering:** `notarize.cjs` gemmer Apples indsendelses-id, før der ventes, genoptager efter netudfald og sender ikke den samme fil igen uden `--send-igen`. Enhedstestet med en falsk `xcrun` i 15 tests. Ikke kørt mod Apple endnu.
+
+## Offentlig desktopbeta 0.5.0-beta.2 · 22. oktober 2026
+
+**Udgivet og observeret:** [Aura 0.5.0-beta.2](https://github.com/ai-alliancen-org/ai-harness/releases/tag/v0.5.0-beta.2) og [downloadsiden](https://ai-alliancen-org.github.io/ai-harness/desktop.html) er offentligt tilgængelige uden GitHub-login. Letvægtstagget `v0.5.0-beta.2` peger på brugerens commit `ec939fee572d816222775a58f2ec50bb2b98e8ad` (`klargør Aura v0.5.0-beta.2 med Udgiv, Alexandra, Corti EU-S og React til komplai Run`), som også var `main`, da workflowet startede. Udgivelsen er oprettet af bjornSkalkam.
+
+- **Før upload:**
+  - Alle tre pakker består `verify-package-source.cjs` mod commit `ec939fe`: 105 appfiler, 32 profilfiler og de fastlåste værktøjer.
+  - Windows-installationsfilens payload er identisk med `win-unpacked` (2534 filer, samme SHA-256).
+  - `test:package` består for den pakkede Apple Silicon-app.
+- **Apple:**
+  - De første DMG'er (`2c5b8908…` og `62f7699a…`) blev godkendt, mens netværket faldt ud under ventetiden. Godkendelserne blev hentet med indsendelsernes id. Apples SHA-256 matchede de lokale filer, så de blev ikke sendt igen.
+  - De fire endelige uploads blev først afbrudt over en iPhone-hotspot, og Apple modtog dem aldrig. På wi-fi blev de sendt igen og godkendt: arm64-ZIP `70e0f26e…`, arm64-DMG `e29ba39d…`, Intel-ZIP `df9296ff…` og Intel-DMG `dcbcba01…`.
+  - Alle har de samme to advarsler som 0.5.0-beta.1: en tom test-zip i Git's kildearkiver.
+  - Slutkontrollen bekræfter signaturer, billetter på appen, distributionskontrol, kvitteringer og samme app i DMG og ZIP (5540 filer) for begge Mac-typer.
+- **Opdatering:** Den offentliggjorte 0.5.0-beta.1 opdaterede sig selv til den notariserede beta.2-ZIP med Squirrel.Mac. Projektfiler, forbindelse, krypteret testnøgle, design og kladde er bevaret, og ingen model blev kaldt automatisk. Automatisk genstart er ikke afprøvet.
+- **Kladde og offentliggørelse:**
+  - Kladden `420974119` fik præcis de syv filer fra `desktop/release/0.5.0-beta.2/downloads/`, alle med status `uploaded` og samme størrelse og SHA-256 som de lokale filer.
+  - Kun de to godkendte kørsler er startet: [Offentliggør gennemgået desktopbeta 39818270165](https://github.com/ai-alliancen-org/ai-harness/actions/runs/39818270165) og [Udgiv downloadside 39818421341](https://github.com/ai-alliancen-org/ai-harness/actions/runs/39818421341). Begge er gennemført.
+- **Efter offentliggørelse:**
+  - Downloadsiden linker til de tre installationsfiler for v0.5.0-beta.2.
+  - Opdateringsfeeds for darwin-arm64, darwin-x64 og win32-x64 viser 0.5.0-beta.2 med `critical: false`.
+  - Alle fem filer er hentet uden login. SHA-256 matcher `SHA256SUMS.txt`, feedenes SHA-512 matcher de hentede filer, og den hentede arm64-DMG består `stapler validate`.
+- **Ikke afprøvet:** Windows-installation og -opdatering, fysisk Intel-Mac og installation på en separat, ren computer.
+
+## Kandidat til 0.5.0-beta.2 · rigtige tjenester · 22. oktober 2026
+
+Arbejdsmappens kode kørt fra kilden i Electron med isolerede appdata og brugerens egne logins. Ikke en pakket app; pakker og platformsprøver står i kandidatens næste afsnit, når de er bygget.
+
+- **Ollama lokalt:** Ollama 0.40.8 installeret med Homebrew, modellerne qwen3:4b og qwen3:8b. Aura fandt Ollama under **AI på din computer**. Samtale svarede, og begge modeller ændrede filer med godkendte værktøjskald. qwen3 følger ikke Auras planformat: Planlæg gav et spørgsmål eller en tom afslutning efter tænkning, som Aura viste som "AI'en stoppede uden et resultat". Med qwen3's egen `/no_think` skrev qwen3:8b appens filer.
+- **Corti EU-S med KL-hackathonens nøgle:** Brugeren indtastede selv nøglen. Før rettelsen ville Aura have sendt en `eu-s:`-nøgle til EU-adressen. Efter rettelsen hentede forbindelsen modellerne fra `ai.eu-s.corti.app`. **Før du sender** viste "EU-S (Sovereign), hos Scaleway i Frankrig". Samtale (34 s), Planlæg med de fire afsnit (30 s) og Byg med to godkendte filændringer lykkedes med corti-s1.
+- **komplai Run i prod:**
+  - Login med PKCE og forbindelse til organisationen "Komplai" lykkedes.
+  - Ny privat app "Find et mødelokale" blev oprettet og udgivet. Statuskontrollen viste "Bekræftet af komplai Run" og "Kun organisationen", og adressen svarer 403 uden login.
+  - Brugeren så appen efter login.
+  - To nye versioner er udgivet til samme app: Corti-versionen og en React-app med Vite, som Aura byggede lokalt. Den lokale bygning hentede pakker fra npm, byggede med `vite build` på 5,6 s og uploadede `index.html` og én JavaScript-fil.
+  - **Vælg en mappe i stedet** førte tilbage til den gamle vej uden upload.
+  - Callback-siden efter login er set i Electron med den rigtige sikkerhedspolitik i lyst og mørkt tema.
+- **Promte:** Login med bjas@kalundborg.dk på `promte.kalundborg.dk` lykkedes. Installationen har ingen appliste og melder `uploadMode: built`, så Aura udgiver ikke dertil. Den viser nu en klar besked om begge forhold. Upload til `kodning.promte.dk` er ikke afprøvet af os; Christian Vingborg kørte forløbet dér 21. oktober (PR 12).
+- **Ikke afprøvet:** pakkede apps, Windows, Intel-Mac og lokal bygning bag en kommunes netværk med blokeret npm.
+
+## Offentlig desktopbeta 0.5.0-beta.1 · 22. oktober 2026
+
+**Udgivet og observeret:** [Aura 0.5.0-beta.1](https://github.com/ai-alliancen-org/ai-harness/releases/tag/v0.5.0-beta.1) og [downloadsiden](https://ai-alliancen-org.github.io/ai-harness/desktop.html) er offentligt tilgængelige uden GitHub-login. Tagget `v0.5.0-beta.1` peger på brugerens commit `f9f5e04eaa6bf22de8ad745f9c6f60032d86f5a6` (`klargør Aura v0.5.0-beta.1 med Promte fra PR 12`), som også var `main`, da kørslerne startede. Udgivelsen indeholder PR 12 og rettelserne fra gennemgangen.
+
+- **Før upload:** Alle tre pakker består `verify-package-source.cjs` mod det taggede commit: 101 appfiler, 32 profilfiler og de fastlåste værktøjer. Mac-apps er kontrolleret udpakket fra de endelige ZIP-filer og Windows fra `win-unpacked`, hvis indhold matcher installationsfilens payload. Kontrollen er gentaget efter brugerens commit med ren arbejdsmappe.
+- **Kladde og offentliggørelse:** Kladden `420101646` fik præcis de syv filer fra `desktop/release/0.5.0-beta.1/r2-downloads/`, alle med status `uploaded` og samme størrelse og SHA-256 som de lokale filer. Kun de to godkendte kørsler er startet: [Offentliggør gennemgået desktopbeta 39684143118](https://github.com/ai-alliancen-org/ai-harness/actions/runs/39684143118) og [Udgiv downloadside 39684274484](https://github.com/ai-alliancen-org/ai-harness/actions/runs/39684274484). Begge bestod. Tagget udløste ingen andre kørsler; kun CodeQL kørte på den forudgående push, hvilket er den godkendte undtagelse.
+- **Offentlig download:** Downloadsiden viser v0.5.0-beta.1 med knapper til Mac · Apple-chip, Mac · Intel og Windows · x64. Alle fem programfiler samt `SHA256SUMS.txt` og `release.json` er hentet fra de offentlige adresser uden token eller cookies; alle fem SHA-256 matcher, og `release.json` og `SHA256SUMS.txt` er identiske med de lokalt kontrollerede. Beta-opdateringsfeeds for `darwin-arm64`, `darwin-x64` og `win32-x64` svarer HTTP 200 og peger på de rigtige filer med samme størrelse og SHA-512 som de offentligt hentede filer. De er ikke markeret kritiske. Den stabile kanal har fortsat ingen feed.
+- **Den offentlige fil er den notariserede:** Begge offentligt hentede DMG-filer består `stapler validate`; selve diskbilledet er ikke kodesigneret, som i 0.4. Appen inde i den offentlige `Aura-0.5.0-beta.1-mac-arm64.dmg` består `codesign --verify --deep --strict`, `stapler validate` og `syspolicy_check distribution`, viser `Developer ID Application: mekbas IVS (2UX98897JW)`, og dens `CFBundleShortVersionString` er `0.5.0-beta.1`.
+- **Platforme:** Offentlig download er ikke en ny platformsprøve. Windows-installation og -opdatering, SmartScreen, fysisk Intel-hardware, automatisk genstart efter Mac-opdatering og Promte i den pakkede app mod en rigtig Promte-server er fortsat ikke afprøvet; se kandidatafsnittet nedenfor.
+
+PR 12 er flettet, og tagget `v0.5.0-beta.1` er oprettet og pushet, begge på brugerens udtrykkelige godkendelse af netop de handlinger. Releasekladden og de to kørsler er ligeledes godkendt særskilt. Der er ikke oprettet commits, branches eller pull requests herfra, og Git-identiteten er uændret.
+
+## Kandidat til 0.5.0-beta.1 efter PR 12 · 21. oktober 2026
+
+**Klar til brugerens releasegennemgang: skrevet, enhedstestet, afprøvet som pakket Apple Silicon-app og med native opgradering fra 0.4.0-beta.1. Alle tre pakker er bygget igen efter PR 12. De endelige Mac-filer til Apple Silicon og Intel er godkendt af Apple og består slutkontrollen. Windows-installationsfilens indhold samt lokale downloads, hjemmeside og opdateringsfeeds er kontrolleret. Ikke offentliggjort.** Kandidaten bygger på merge commit `a28e368` (PR 12) plus rettelserne nedenfor i arbejdsmappen. Kildekontrollen gentages mod det endelige releasecommit.
+
+- **PR 12 gennemgået og flettet:** Promte-login i Aura uden CLI, appliste og oprettelse af app i Del samt forhåndsvisning med rigtige data gennem en bro i hovedprocessen. Tokens bliver i hovedprocessen og gemmes krypteret; broen tillader kun Promtes app-API og chatkald til den koblede Promte-adresse.
+- **Rettelser efter gennemgangen:** Forhåndsvisningen svarer kun en Promte-app, når Promte-integrationen er slået til, og opretter først en app i Promte efter brugerens klik. Del er forudfyldt med `https://app.promte.dk`. Uden koblet app bruger forhåndsvisningen den Promte, brugeren er logget ind på i Aura. Log ud fjerner fortsat kun den lokale adgang.
+- **360 enhedsprøver består** på Node 22.23.3: samme udvalg som før plus `promte-preview.test.cjs`. De samme 27 Git-skrivende cases er bevidst udeladt; det er ikke den ufiltrerede testsuite.
+- **Electron:** `test:promte-preview`, `test:promte-share` og `test:deployment` består efter rettelserne; `test:tools` bestod på den flettede kode. Promte-prøven kører Auras egen kobling, funktionsvalg og oprettelse med lokale Promte-adaptere og viser, at Aura ikke kontakter Promte, før integrationen er slået til. Promte er ikke kørt i den pakkede app mod en rigtig server her; bidragyderen beskriver kørsler af kernemodulerne mod Promtes testservere.
+- **Pakkeindhold:** Kildekontrollen består på Apple Silicon, Intel og Windows: 101 appfiler, 32 profilfiler og de fastlåste OpenCode 1.18.33, Git 2.53.0 og Node 22.23.3. Runtime er genforberedt med kontrol mod låsefilen, og `npm ci` er kørt før pakningen.
+- **Pakket Apple Silicon-app:** Signatur og `test:package` består med isolerede brugerdata og begrænset PATH. Medfølgende værktøjer, pakkens projektfunktion, profiler og preview er afprøvet. Skærmen er visuelt gennemgået. Prøven opretter ingen commits.
+- **Mac-filer:** Seks nye Apple-indsendelser er Accepted: de to første DMG-filer og de endelige DMG- og ZIP-filer til Apple Silicon og Intel. Slutkontrollen består for begge arkitekturer: signaturer, vedhæftede appbilletter, distributionskontrol, kvitteringer, der matcher filerne, og 5.540 identiske poster i appen i DMG og ZIP. Intel er ikke afprøvet på fysisk hardware.
+- **Native opgradering fra 0.4.0-beta.1:** Den signerede 0.4-apps egen opdateringscontroller hentede den nye notariserede ZIP, og Squirrel.Mac installerede den. Projektfiler, forbindelse, krypteret testnøgle, designpakke og kladde er bevaret uden automatisk modelsendelse eller Git-skrivninger. Isolerede brugerdata og kontrolleret manuel genåbning; automatisk genstart er ikke afprøvet.
+- **Windows-installationsfil:** Den faktiske NSIS-fil er udpakket. Alle 2.534 payloadfiler og 2.426 runtimefiler matcher byggeoutput og runtime. Filen er 251.526.351 bytes med SHA-256 `c03b4c672a27a1c57aa8a85111e0e6b5f7e43d6fffad6f92a5201a67dfdf60a8`. Opdateringsmetadata matcher størrelse og SHA-512. Installationsfilen er usigneret.
+- **Downloads, side og feeds:** Alle tre installationsfiler er hentet gennem den lokale downloadside, og filnavne, størrelser og SHA-256 matcher. Repositoryets releasekontrol består mod en simuleret kladde med de faktiske filer og kvitteringer. Den samlede hjemmeside består med 12 skærmbilleder, 88 lokale links og ingen fejl eller vandret overløb, og alle tre genererede opdateringsfeeds matcher filernes størrelse og SHA-512. Det er lokal kontrol, ikke offentlig HTTP-adgang.
+
+**Releasefiler:** De fem programfiler, `release.json` og `SHA256SUMS.txt` ligger i `desktop/release/0.5.0-beta.1/r2-downloads/`. Kun disse syv filer skal uploades. Kvitteringer og slutkontrol ligger i `r2-final-arm64/` og `r2-final-intel/`, Windows-kontrollen i `r2-windows/installer-check.json`. Filerne i `downloads/` fra kandidaten 20. oktober indeholder ikke PR 12 og udgives ikke.
+
+**Ikke afprøvet på målplatform:** Fysisk Intel-Mac samt Windows-installation, første start, opdatering, afinstallation og SmartScreen. Promte i den pakkede app mod en rigtig Promte-server og nye eksterne Promte-, GitHub Pages- og Cloudflare Pages-udgivelser er ikke afprøvet.
+
+Lokal evidens: logs og rapporter i `/private/tmp/claude-501/-Users-bjornskalkam-GitHub-os-harness/8f624b89-9f41-4c8d-93d3-a9b418bb254c/scratchpad/` (bl.a. `fixed-unit.log`, `fix-promte-preview.log`, `r2-test-package-arm64.log`, `r2-native-upgrade.log`, `r2-download-check.log` og `r2-web/`). Der er ikke oprettet commits, tags, releases eller GitHub Actions-kørsler herfra; PR 12 er flettet efter brugerens godkendelse.
+
+## Kandidat til 0.5.0-beta.1 · 20. oktober 2026
+
+Erstattet af kandidaten efter PR 12 ovenfor.
+
+**Klar til brugerens releasegennemgang: skrevet, enhedstestet og afprøvet som pakket Apple Silicon-app, inklusive native opgradering fra 0.4.0-beta.1. De endelige Mac-filer til både Apple Silicon og Intel er godkendt af Apple og består slutkontrollen. Windows-installationsfilens indhold samt lokale downloads, hjemmeside og opdateringsfeeds er kontrolleret. Ikke offentliggjort.** Kandidaten bygger på brugerens commit `5ab58c0` plus versionsopdatering, Windows-rettelsen og test-/dokumentationsændringerne beskrevet her. Kildekontrollen skal gentages mod det endelige releasecommit.
+
+- **349 enhedsprøver består** på Node 22.23.3 fra den fastlåste runtime. Listen dækker udbydere, login, Del, opdateringer, pakning, releasekontrakt og Pages. 27 cases, der skriver Git-historik eller Git-opsætning, er bevidst udeladt. Ingen Git-mutationer blev udført; dette er ikke en kørsel af den ufiltrerede testsuite.
+- **Windows-startfiler:** Azure-, SWA-, Vercel- og Promte-værktøjerne kan starte gennem deres officielle Windows-startfiler uden `cmd.exe`. Otte nye tests kontrollerer bl.a. specialtegn, standardinput, manglende værktøjer og ukendte batchformater. En faktisk npm-genereret wrapper er ført gennem løsningen med en lokal Node-proces på Mac. Det er ikke en afprøvning på Windows.
+- **Pakkeindhold:** Kildekontrollen består på Apple Silicon, Intel og Windows: 99 appfiler, 32 profilfiler samt låste versioner af OpenCode 1.18.33, Git 2.53.0 og Node 22.23.3. Alle runtimearkiver er genforberedt med kontrol mod låsefilens checksums.
+- **Pakket Apple Silicon-app:** Signaturen og `test:package` består med isolerede brugerdata og begrænset PATH. Medfølgende OpenCode, Git, Node og npm er startet, pakkens projektfunktion og profiler er brugt, og faktiske projektfiler vises i preview. Skærmen er visuelt gennemgået. Prøven opretter ingen commits og dækker derfor ikke automatisk første version eller Gem version.
+- **Intel-Mac:** Den signerede apps `codesign --verify --deep --strict` og kildekontrol består. Appen er ikke startet på fysisk Intel-hardware.
+- **Windows-installationsfil:** Den faktiske NSIS-fil er udpakket. Alle 2.534 payloadfiler, i alt 811.631.692 bytes, matcher `win-unpacked` i filnavne, størrelse og SHA-256. Alle 2.426 runtimefiler matcher den genforberedte runtime. Filen er 251.519.883 bytes med SHA-256 `fdb7711558778c270d49054df25221bf5adf89cb223f38fd52125d99d10c89f0`. Opdateringsmetadata matcher EXE-filens størrelse og SHA-512. Installationsfilen er usigneret.
+- **Opdateringsbrugerflade:** Rigtig Electron og lokal HTTP afprøver download, forkert SHA-512, særskilt Hent og Genstart, blokering under igangværende arbejde og bevaret kladde. Skærmen ved 980 × 720 er visuelt gennemgået. Installationskaldet opsamles i denne prøve; den særskilte native opgraderingsprøve er beskrevet nedenfor.
+- **Native opgradering fra 0.4.0-beta.1 til 0.5.0-beta.1:** Den tidligere pakkes egen opdateringscontroller hentede den signerede ZIP, og Squirrel.Mac installerede den. Efter kontrolleret manuel genåbning er projektfiler, forbindelse, krypteret testnøgle, designpakke og kladde bevaret. Der skete ingen automatisk modelsendelse eller Git-skrivninger. Prøven består på Apple Silicon med isolerede brugerdata; automatisk genstart er ikke afprøvet. Skærmbilledet er visuelt gennemgået. Den gamle 0.4-pakke er kontrolleret mod sin Apple-kvittering samt med signatur- og billetkontrol.
+- **Hjemmeside:** Den opdaterede skabelon er afprøvet lokalt med faktiske offentlige 0.4-metadata: 12 sideskærmbilleder, 88 lokale links, tastatur, App/Terminal-valg, visning uden JavaScript og ingen rendererfejl eller vandret overløb ved 1280 og 390 pixels. Versionshistorikken omfatter nu også 0.3 og 0.4. Dette er ikke offentlig adgang til 0.5.
+- **Endelige downloads og 0.5-side:** Alle tre faktiske installationsfiler er hentet i Chrome fra den lokale downloadside og matcher filnavne, størrelser og SHA-256 i filoversigten. Aura-logo, favicon og touch-ikon matcher originalen. Desktop og mobil er visuelt gennemgået. Den samlede hjemmeside er derudover afprøvet med faktiske lokale 0.5-filer og simulerede kommende releaseoplysninger: 12 skærmbilleder, 88 lokale links, tastatur, App/Terminal og visning uden JavaScript består uden rendererfejl eller vandret overløb. De tre 0.5-downloadlinks og alle tre genererede opdateringsfeeds matcher version, filstørrelse og SHA-512 for de faktiske binære filer. Det er lokal kontrol, ikke offentlig HTTP-adgang til 0.5.
+
+**Mac-filer:** Alle seks godkendte Apple-indsendelser har status Accepted: de to indledende DMG-filer og de endelige DMG-/ZIP-filer til Apple Silicon og Intel. Slutkontrollen består for begge arkitekturer: signaturer, vedhæftede appbilletter, distributionskontrol og match med notariseringskvitteringerne. For hver arkitektur har appen i DMG og ZIP 5.540 identiske poster; kildekontrollen bekræfter 99 appfiler, 32 profilfiler og de fastlåste værktøjer. De fire endelige kvitteringer og begge `final-check.json` ligger i `desktop/release/0.5.0-beta.1/final-arm64/` og `desktop/release/0.5.0-beta.1/final-intel/`. Det er ikke en installationsprøve på fysisk Intel-hardware.
+
+**Afventer:** Brugerens releasecommit, push og tag samt særskilt godkendte Release- og Pages-kørsler og efterfølgende kontrol af de offentlige downloads og feeds. De fem programfiler, `release.json` og `SHA256SUMS.txt` er samlet og kontrolleret i `desktop/release/0.5.0-beta.1/downloads/`. Kun disse syv filer skal uploades; lokale Apple-kvitteringer og downloadsidens hjælpefiler skal ikke med. Kandidaten er ikke offentliggjort.
+
+**Ikke afprøvet på målplatform:** Fysisk Intel-Mac samt Windows-installation, første start, opdatering, afinstallation og SmartScreen. De nye Promte-, GitHub Pages- og Cloudflare Pages-forløb har fortsat den lokale prøvedækning beskrevet nedenfor, ingen ny ekstern udgivelsesprøve.
+
+Lokal evidens: `/tmp/aura-0.5-test-summary.json`, `/tmp/aura-release-unit-tests.log`, `/tmp/aura-0.5-updates-ui.log`, `/tmp/aura-0.5-package-arm64.log`, `/tmp/aura-0.5-native-upgrade.log`, `/tmp/aura-0.5-web-verification.json`, `/tmp/aura-0.5-download-check.json`, `/tmp/aura-0.5-final-preflight.json`, `/tmp/aura-0.5-web-final.json`, `/tmp/aura-0.5-feed-check.json` og `desktop/release/0.5.0-beta.1/windows/installer-check.json`. Der er ikke oprettet commits, tags, releases eller GitHub Actions-kørsler herfra.
 
 ## Fælles Del-forløb og flere udgivelsessteder · 20. oktober 2026
 

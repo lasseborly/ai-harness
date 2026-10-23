@@ -1,6 +1,6 @@
 # Promte-apps i detaljer
 
-Kontrolleret mod Promte 18. oktober 2026. Den fulde engelske vejledning følger med `@promte/app-upload` og kan lægges i projektet med `npx @promte/app-upload skill`.
+Kontrolleret mod Promte 21. oktober 2026. Den fulde engelske vejledning følger med `@promte/app-upload` og kan uden for Aura lægges i projektet med `npx @promte/app-upload skill`.
 
 ## Mindste projekt
 
@@ -26,7 +26,6 @@ package-lock.json     kun nødvendig, hvis appen har pakker under dependencies
   "dependencies": {},
   "devDependencies": {
     "@promte/app-library": "^0.1.6",
-    "@vitejs/plugin-react": "^4.3.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "vite": "^5.4.10"
@@ -34,7 +33,7 @@ package-lock.json     kun nødvendig, hvis appen har pakker under dependencies
 }
 ```
 
-Installér med `npm install --legacy-peer-deps`, så længe app-biblioteket angiver React 18 som peer. En `vite.config.js` med `@vitejs/plugin-react` må gerne ligge lokalt. Kommandolinjeværktøjet uploader den ikke.
+Installér med `npm install --legacy-peer-deps`, så længe app-biblioteket angiver React 18 som peer. Der skal ingen `vite.config.js` til. Vite bygger JSX uden. Promte bygger med Node 22, så brug gerne Node 22 lokalt. Node 20.18 eller nyere virker også.
 
 `src/main.jsx`:
 
@@ -65,12 +64,12 @@ createRoot(document.getElementById("root")).render(
 
 ## App-biblioteket
 
-`usePromte()` giver `ready`, `state` og `error`. `usePromteClient()` giver klienten:
+`usePromte()` giver `ready`, `state` og `error`. `state` er `booting`, `waiting_for_settings`, `waiting_for_token` eller `ready`. Uden for Promte når appen aldrig `ready`. `usePromteModels({ type, configuredOnly })` giver `{ models, loading, error, reload }`. `usePromteClient()` giver klienten:
 
 - `models({ type, configuredOnly })`: modeller med `id`, `label`, `type` og `configured`. Typer er `llm`, `embedding`, `image`, `stt` og `tts`.
-- `chatText({ model, messages })` og `chatCompletions(...)`.
+- `chatText({ model, messages })` giver svaret som tekst. `messages` er `[{ role: "system" | "user" | "assistant", content }]`. `chatCompletions(...)` giver det fulde svar i OpenAI-format.
 - `embeddings.create({ model, input })`.
-- `data(scope).ref("a/b")` med `get`, `set`, `update`, `remove` og `push`. `private` er pr. bruger. `public` er fælles, og kun administratorer kan skrive.
+- `data(scope).ref("a/b")` med `get`, `set`, `update`, `remove` og `push`. `private` er pr. bruger. `public` er fælles, og kun administratorer kan skrive. `get()` giver `null`, når intet er gemt. `update({ "x/y": værdi })` bruger stier under ref'en. `push(værdi)` lægger til en liste og opretter den, hvis den mangler.
 - `files(scope)` på nyere Promte-servere: `upload`, `list`, `download` og `remove`.
 - `knowledge.search({ query, workspaceId })`.
 - `functions.invoke(navn, input)` kalder en backend-funktion.

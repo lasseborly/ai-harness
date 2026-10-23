@@ -62,8 +62,9 @@ async function installFixture(app, mode, project) {
     if (await page.locator('#deployment-dialog').evaluate(el => el.open)) {
       const choices = await page.locator('#deployment-dialog :is(button,select,summary,input[type=checkbox],input[type=radio]):visible').count();
       const providers = await page.locator('[data-deploy-step="providers"]').isVisible();
-      if (providers) assert.deepEqual(await page.locator('#deployment-dialog button:visible').evaluateAll(items => items.map(item => item.dataset.provider || item.id || 'luk').sort()), ['azure', 'deployment-back', 'komplai', 'luk', 'vercel']);
-      assert(providers ? choices === 5 : choices <= 4, `${mode}: ${choices} synlige kontroller`); screens.push({ mode, choices, providers });
+      // Udbyderne vises tre ad gangen med Flere udbydere, Tilbage og Luk.
+      if (providers) assert.deepEqual(await page.locator('#deployment-dialog button:visible').evaluateAll(items => items.map(item => item.dataset.provider || item.id || 'luk').sort()), ['deployment-back', 'deployment-more-providers', 'komplai', 'luk', 'promte', 'vercel']);
+      assert(providers ? choices === 6 : choices <= 4, `${mode}: ${choices} synlige kontroller`); screens.push({ mode, choices, providers });
     } else screens.push({ mode });
     await page.screenshot({ path: path.join(root, mode + '.png') });
   };
@@ -79,7 +80,11 @@ async function installFixture(app, mode, project) {
     if (captureName) await capture(page, captureName + '-del');
     await page.click('#deployment-other');
     const cards = page.locator('[data-deploy-step="providers"] [data-provider]:visible');
-    assert.deepEqual(await cards.evaluateAll(items => items.map(item => item.dataset.provider)), ['azure', 'komplai', 'vercel']);
+    // Seks ligestillede udbydere i alfabetisk rækkefølge, tre ad gangen; ingen er fremhævet.
+    assert.deepEqual(await cards.evaluateAll(items => items.map(item => item.dataset.provider)), ['azure', 'cloudflare', 'github-pages']);
+    assert.equal(await cards.evaluateAll(items => items.some(item => item.matches('.primary, [aria-pressed="true"]') || /anbefalet/i.test(item.innerText))), false);
+    await page.click('#deployment-more-providers');
+    assert.deepEqual(await cards.evaluateAll(items => items.map(item => item.dataset.provider)), ['komplai', 'promte', 'vercel']);
     assert.equal(await cards.evaluateAll(items => items.some(item => item.matches('.primary, [aria-pressed="true"]') || /anbefalet/i.test(item.innerText))), false);
     assert.equal(await app.evaluate(() => globalThis.komplaiFixtureCalls.length), calls, 'Indgangen og udbydervalget må ikke kontakte en tjeneste.');
     if (captureName) await capture(page, captureName + '-udbydere');
@@ -151,7 +156,7 @@ async function installFixture(app, mode, project) {
       const invalid = await page.evaluate(() => window.harness.komplaiConnect({ organisationId: 'syntetisk-org', coding: true, publishing: true }));
       assert.equal(invalid.ok, false); assert.match(invalid.error, /Run/);
       assert.equal((await app.evaluate(() => globalThis.komplaiFixtureCalls)).some(c => c.route.endsWith('/connect')), false);
-      // Afbryd uden at udstede adgang, og log ind igen fra Del.
+      // Afbryd uden at udstede adgang, og log ind igen fra Udgiv.
       await page.keyboard.press('Escape');
       assert.equal((await page.evaluate(() => window.harness.komplaiPublishState())).value.connected, false);
       await chooseRun(page, app); await page.click('#komplai-publish-login');

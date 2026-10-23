@@ -98,7 +98,9 @@ const questions = [
     await helpers.addConnection(page, { name: 'Kontrolleret plan', baseURL: `http://127.0.0.1:${server.address().port}/v1` });
     const connection = (await page.evaluate(() => window.harness.connectionState())).value.connections[0].id;
     await helpers.taskOptions(page); await page.selectOption('#connection-select', connection); await page.locator('#model-shortlist button').first().click();
-    assert.equal(await page.inputValue('#work-mode'), 'plan');
+    // Samtale er standard. Prøvens afklaring og plan kræver Planlæg.
+    assert.equal(await page.inputValue('#work-mode'), 'chat');
+    await helpers.selectMode(page, 'plan');
 
     // Første besked: Før du sender viser briefen under alle oplysninger.
     await page.click('#send'); await page.waitForSelector('#data-dialog[open]');

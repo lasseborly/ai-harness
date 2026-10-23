@@ -16,7 +16,7 @@ const helpers = require('./ui-test-helpers.cjs');
  const values = async page => (await page.evaluate(()=>window.harness.preferencesGet())).value.values;
  try {
   let page=await launch(); const errors=[]; page.on('pageerror',e=>errors.push(e.message));
-  // Udgivelsesønsket hører til Deling og udgivelse, som ikke er med i den anbefalede pakke.
+  // Udgivelsesønsket hører til Udgivelse, som ikke er med i den anbefalede pakke.
   await helpers.enableSharing(page);
   const connection=(await page.evaluate(()=>window.harness.saveConnection({kind:'compatible',name:'Egen testserver',baseURL:'http://127.0.0.1:1/v1'}))).value.connections[0];
   await page.evaluate(()=>window.harness.saveDesign({name:'Testdesign',color:'#123456',links:['https://design.gentofte.dk/']}));

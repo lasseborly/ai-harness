@@ -1,7 +1,7 @@
 // Planen og AI'ens spørgsmål i en form, brugeren kan overskue. Rene funktioner uden DOM, så de kan afprøves i Node.
 (root => {
   // AI'en bliver bedt om at skrive planen under fire faste overskrifter. Andre overskrifter vises, som de er.
-  const known = [['bygger', /^det bygger vi$/i], ['design', /^sådan skal det se ud$/i], ['teknik', /^teknik og data$/i], ['proev', /^det skal du prøve$/i]];
+  const known = [['bygger', /^det bygger vi$/i], ['design', /^sådan skal det se ud$/i], ['teknik', /^teknik og data$/i], ['proev', /^det skal du prøve(?:\s*\([^\n()]+\)|\s+i forhåndsvisningen)?$/i]];
   function headingOf(line) {
     const markdown = /^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line);
     const text = (markdown ? markdown[1] : line).trim().replace(/^(\*\*|__)(.+)\1$/, '$2').replace(/[:：]\s*$/, '').trim();

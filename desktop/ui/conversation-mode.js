@@ -18,7 +18,13 @@
     const parsed = (typeof module === 'object' && module.exports ? require('./plan-view.js') : root.PlanView).parsePlan(visible(text));
     return ['bygger', 'design', 'teknik', 'proev'].every(key => parsed.sections.some(section => section.key === key && section.body.trim()));
   }
-  const rules = `SAMTALE OG VALG: Følg brugerens aktuelle hensigt. En almindelig samtale eller et spørgsmål skal besvares direkte uden byggeplan, statusrapport eller prøvevejledning. Et nej til at bygge er ikke en godkendt plan. Ved et nej: anerkend det kort, afslut med slutmarkøren <!-- aura:stay --> på sin egen linje, og foreslå ikke bygning igen. I Samtale må du læse relevante projektfiler, men ikke ændre filer eller køre kommandoer. Hvis brugeren viser konkret interesse for en løsning og en plan ville være nyttig, kan du én gang foreslå at planlægge den og afslutte med <!-- aura:offer-plan --> på sin egen linje. Markøren giver kun en knap; brugeren vælger selv. Brug aldrig disse slutmarkører i kodeblokke. Kun i Planlæg skriver du selve planen under de fire overskrifter Det bygger vi, Sådan skal det se ud, Teknik og data, Det skal du prøve. Mangler afklaring, svar uden en plan. Filændringer kræver, at brugeren har valgt Byg eller Arbejd direkte.`;
-  const api = { visible, action, concretePlan, rules };
+  // Kun brugerens egen, direkte besked kan skifte fra læsning til bygning.
+  // Citater, spørgsmål og generelle omtaler af at bygge giver ingen tilladelse.
+  function buildRequest(text) {
+    const value = String(text || '').trim().toLocaleLowerCase().replace(/[.!]+$/, '').trim();
+    return /^(?:(?:ja|yes|ok|okay|fint|tak)[,!]?\s+)?(?:byg(?:\s+(?:den|det|appen|planen|den nu|det nu|appen nu|planen nu|efter planen))?|gå i gang(?:\s+med at bygge)?|build(?:\s+(?:it|the app|the plan|it now))?|go ahead and build(?:\s+(?:it|the app|the plan))?|start building(?:\s+(?:it|the app))?)$/.test(value);
+  }
+  const rules = `SAMTALE OG VALG: Følg brugerens aktuelle hensigt. En almindelig samtale eller et spørgsmål skal besvares direkte uden byggeplan, statusrapport eller prøvevejledning. Et nej til at bygge er ikke en godkendt plan. Ved et nej: anerkend det kort, afslut med slutmarkøren <!-- aura:stay --> på sin egen linje, og foreslå ikke bygning igen. I Samtale må du læse relevante projektfiler, men ikke ændre filer eller køre kommandoer. Hvis brugeren viser konkret interesse for en løsning og en plan ville være nyttig, kan du én gang foreslå at planlægge den og afslutte med <!-- aura:offer-plan --> på sin egen linje. Markøren giver kun en knap; brugeren vælger selv. Brug aldrig disse slutmarkører i kodeblokke. Kun i Planlæg skriver du selve planen under de fire overskrifter Det bygger vi, Sådan skal det se ud, Teknik og data, Det skal du prøve. Mangler afklaring, svar uden en plan. Filændringer kræver, at brugeren har valgt Byg.`;
+  const api = { visible, action, concretePlan, buildRequest, rules };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ConversationMode = api;
 })(typeof window === 'object' ? window : globalThis);

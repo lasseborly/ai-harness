@@ -16,11 +16,11 @@ test('hostingvejledninger åbner kun kendte kilder og skelner fra upload', () =>
   }
 });
 
-test('agentens faktiske appregler beskriver Del og de tilgængelige udgivelsesveje', () => {
+test('agentens faktiske appregler beskriver Udgiv og de tilgængelige udgivelsesveje', () => {
   const enabled = appRules({ deling: true });
-  assert.match(enabled, /knap Del står øverst/);
+  assert.match(enabled, /knap Udgiv står øverst/);
   assert.match(enabled, /Azure Static Web Apps, Cloudflare Pages, GitHub Pages, komplai Run, Promte Apps og Vercel/);
-  assert.match(enabled, /komplai Run og Promte Apps kræver konto og betalt aftale/);
+  assert.match(enabled, /komplai Run kræver komplai-konto\. Promte Apps kræver konto og betalt aftale/);
   assert.match(enabled, /Netlify Drop har vejledning, men ingen uploadintegration/);
   assert.match(enabled, /Brugeren committer og pusher selv/);
   assert.match(enabled, /Vercel bruger projektets eksisterende Git-integration/);
@@ -28,7 +28,7 @@ test('agentens faktiske appregler beskriver Del og de tilgængelige udgivelsesve
   assert.match(enabled, /Python\/Node-servere kan ikke udgives som statiske filer/);
   const disabled = appRules({ deling: false });
   assert.match(disabled, /Indstillinger → Funktioner/);
-  assert.doesNotMatch(disabled, /knap Del står øverst/);
+  assert.doesNotMatch(disabled, /knap Udgiv står øverst/);
 });
 
 test('vejledninger beskriver de faktiske login- og udgivelseskrav uden at anbefale en udbyder', () => {
@@ -39,6 +39,7 @@ test('vejledninger beskriver de faktiske login- og udgivelseskrav uden at anbefa
   assert.match(entries['github-pages'].steps.join(' '), /standardbranch/);
   assert.match(entries.promte.scope, /React-kildepakke/);
   assert.match(entries.promte.summary, /betalt aftale/);
-  assert.match(entries.komplai.summary, /betalt aftale/);
+  assert.match(entries.komplai.summary, /Kræver komplai-konto/);
+  assert.doesNotMatch([entries.komplai.summary, ...entries.komplai.steps].join(' '), /betalt|kontakt/i);
   assert.ok(catalog().every(item => !item.recommended && !item.default));
 });

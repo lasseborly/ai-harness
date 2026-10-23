@@ -89,7 +89,7 @@ const helpers = require('./ui-test-helpers.cjs');
     await page.fill('#purpose', ''); await page.locator('#idea-examples-toggle').waitFor();
     checks.push('eksempler på idéer udfylder idé og navn og skjules, når feltet har tekst');
 
-    // Paletten respekterer valgte funktioner: Del er ikke slået til, så den kan ikke findes.
+    // Paletten respekterer valgte funktioner: Udgiv er ikke slået til, så den kan ikke findes.
     let options = await palette('udgiv');
     assert.equal(await options.count(), 0); await page.locator('#palette-empty:not([hidden])').waitFor();
     await page.keyboard.press('Escape'); await page.locator('#palette:not([open])').waitFor({ state: 'attached' });
@@ -105,7 +105,7 @@ const helpers = require('./ui-test-helpers.cjs');
     await page.locator('#approvals button').filter({ hasText: 'Kun denne fil' }).waitFor({ timeout: 60000 });
     const titleA = 'Byg en forside med en stor overskrift';
     await row(titleA).waitFor(); assert.equal(await openTitle(), titleA);
-    await page.click('#new-conversation');
+    await page.click('#project-list .project-entry.is-current .project-add');
     await page.waitForFunction(() => document.querySelector('#messages').textContent === '' && document.querySelector('#prompt').value === '');
     await row(titleA).locator('.chat-meta.is-waiting').filter({ hasText: 'venter på dig' }).waitFor();
     assert.equal(await page.isVisible('#approvals button'), false, 'godkendelsen hører til samtale A');

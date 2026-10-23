@@ -129,8 +129,8 @@
     },
     {
       "id": "deling",
-      "title": "Deling og udgivelse",
-      "summary": "Del en testversion, og tag en sikkerhedskopi på GitHub.",
+      "title": "Udgivelse",
+      "summary": "Udgiv en testversion, og tag en sikkerhedskopi på GitHub.",
       "requires": [
         "versioner"
       ],
@@ -628,10 +628,10 @@
       "title": "Promte",
       "summary": "Bygger en app, der kører i et Promte-arbejdsområde, og uploader kildekoden, så Promte tjekker og bygger den.",
       "faq": {
-        "hvad": "Hjælper agenten med at opsætte et React-projekt efter Promtes byggeregler, bruge app-biblioteket til modeller, vidensbaser og data og uploade kildekoden med Promtes kommandolinjeværktøj.",
+        "hvad": "Hjælper agenten med at opsætte et React-projekt efter Promtes byggeregler og bruge app-biblioteket til modeller, vidensbaser og data. I Aura udgiver brugeren med Udgiv, i andre værktøjer med Promtes kommandolinjeværktøj.",
         "hvornaar": "Når en løsning skal køre som app i et Promte-arbejdsområde.",
         "resultat": "Et projekt, som Promte kan bygge, uden nøgler i koden, og en version, der venter på godkendelse eller er udgivet i arbejdsområdet.",
-        "ikke": "Opretter ikke en Promte-konto, et arbejdsområde eller administratorrettigheder for dig og godkender ikke versioner. Kommandolinjeværktøjet hentes fra npm, når brugeren siger ja."
+        "ikke": "Opretter ikke en Promte-konto eller administratorrettigheder for dig og godkender ikke versioner. Agenten udgiver ikke selv fra Aura. Kommandolinjeværktøjet i andre værktøjer hentes fra npm, når brugeren siger ja."
       },
       "sources": [
         {
@@ -655,32 +655,32 @@
         "system": "Promte-apps via app-biblioteket og kommandolinjeværktøjet til upload",
         "owner": "Promte",
         "maintainer": "Promte",
-        "access": "Kræver en Promte-installation og administratorrettighed i appens arbejdsområde. Login til upload godkendes i browseren og gælder i 30 dage.",
+        "access": "Kræver en Promte-installation og administratorrettighed i appens arbejdsområde. Login til udgivelse godkendes i browseren og gælder i 30 dage. En ny app kan oprettes fra Aura.",
         "data": "Appens egne data og filer i Promte, privat for hver bruger eller fælles for arbejdsområdet. Om der er persondata, afhænger af appen.",
         "dataFlow": "Appen kalder kun organisationens Promte-server, som sender modelkald videre til de modeller, organisationen har valgt. Kildekoden uploades til samme server, som bygger og gennemgår den.",
         "cost": "Kræver en aftale med Promte. Prisen er ikke offentliggjort og er ikke verificeret her.",
         "itRoute": true,
         "sensitive": false,
-        "checkedAt": "2026-10-18"
+        "checkedAt": "2026-10-21"
       }
     },
     {
       "name": "harness-integration-komplai-run",
       "title": "Komplai Run",
-      "summary": "Forbereder statiske browserapps og vejleder om udgivelse fra Aura eller andre kodeværktøjer.",
+      "summary": "Bygger browserapps til komplai Run, også med komplais app-SDK, og vejleder om udgivelse fra Aura eller andre kodeværktøjer.",
       "faq": {
-        "hvad": "Hjælper med at bygge og gennemgå de filer, Run kan vise, vælge adgang og kontrollere den udgivne app. I Auras desktopapp bruges Del; fra Aura-terminalen henvises til manuel upload i Hub. Andre kodeværktøjer kan bruge Komplais terminalværktøj.",
+        "hvad": "Hjælper med at bygge og gennemgå de filer, Run kan vise, bruge komplais app-SDK til login, AI, Redact, gemte data og hændelseslog, vælge adgang og kontrollere den udgivne app. I Auras desktopapp bruges Udgiv; fra Aura-terminalen henvises til manuel upload i Run. Andre kodeværktøjer kan bruge komplais terminalværktøj.",
         "hvornaar": "Når du har valgt Komplai Run til en browserapp eller vil opdatere en app der.",
         "resultat": "En gennemgået browserapp med alle nødvendige filer, en vej til udgivelse og en tydelig beskrivelse af, hvad der er afprøvet.",
-        "ikke": "Giver ingen adgang og udgiver ikke uden dit valg. Agentens kommandoværktøj må ikke publicere i Aura. Run stiller ikke serverkode, database eller en AI-proxy til rådighed gennem denne udgivelsesvej."
+        "ikke": "Giver ingen adgang, godkender ikke appens brug af komplai og udgiver ikke uden dit valg. Agentens kommandoværktøj må ikke publicere i Aura. Run kører ingen serverkode; login, AI, Redact og gemte data fås kun gennem app-SDK'et efter en administrators godkendelse."
       },
       "sources": [
         {
-          "title": "Komplai Run · vejledning i Hub",
+          "title": "komplai Run · vejledning i Hub",
           "url": "https://hub.komplai.dk/publish?guide=1"
         },
         {
-          "title": "Komplais offentlige udgivelseskit · API, skill og CLI 0.1.0",
+          "title": "komplais udgivelseskit · API med app-SDK, skill og CLI 0.2.1",
           "url": "https://hub.komplai.dk/komplai-publish/komplai-publish.zip"
         }
       ],
@@ -688,13 +688,13 @@
         "system": "Komplai Run",
         "owner": "Komplai",
         "maintainer": "Aura Harness",
-        "access": "Kræver en Komplai-organisation med Run. Aura bruger login og en udgivelsesadgang til dine egne apps i 30 dage. Eget kodeværktøj bruger en nøgle til én app i syv dage.",
-        "data": "Færdig HTML, CSS, JavaScript og appens øvrige filer. Offentlig adgang gør alle de uploadede filer tilgængelige for enhver.",
-        "dataFlow": "Filer uploades fra din computer til organisationens appmiljø gennem Komplai. Besøgende henter filerne til deres browser; appens eventuelle eksterne kald skal gennemgås særskilt.",
+        "access": "Kræver en komplai-organisation med Run. Aura bruger login og en udgivelsesadgang til dine egne apps i 30 dage. Eget kodeværktøj bruger en nøgle til én app i syv dage. En administrator godkender appens brug af login, AI, Redact og gemte data i Run.",
+        "data": "Færdig HTML, CSS, JavaScript og appens øvrige filer. Offentlig adgang gør alle de uploadede filer tilgængelige for enhver. Apps for organisationen kan gemme data og sende tekst til AI og Redact gennem app-SDK'et; om der er persondata, afhænger af appen.",
+        "dataFlow": "Filer uploades fra din computer til organisationens appmiljø gennem komplai. Besøgende henter filerne til deres browser. Appens SDK-kald går til appens egen adresse og derfra til komplai med den indloggede persons egen adgang; appens eventuelle eksterne kald skal gennemgås særskilt.",
         "cost": "Følger organisationens aftale. Aktuelle lager- og trafikrammer vises i Hub.",
-        "itRoute": false,
+        "itRoute": true,
         "sensitive": false,
-        "checkedAt": "2026-10-18"
+        "checkedAt": "2026-10-22"
       }
     }
   ],

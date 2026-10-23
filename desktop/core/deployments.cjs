@@ -1,6 +1,7 @@
 const { randomUUID, createHash } = require('node:crypto');
 const path = require('node:path');
 const { deploymentArtifact } = require('./deployment-artifact.cjs');
+const { komplaiSource, buildSaved } = require('./komplai-build.cjs');
 const { VercelDeployment, AzureDeployment, publicURL } = require('./deployment-providers.cjs');
 const { KomplaiDeployment, validLabel, refusedFiles } = require('./komplai-publish.cjs');
 const { PromteDeployment, promteConfiguration, preparePromteArtifact, validatePromteArtifact } = require('./provider-promte.cjs');
@@ -13,10 +14,14 @@ function relative(value) { if(typeof value!=='string'||!value||value.includes('\
 function komplaiConfiguration(input) {
   if(!['public','private'].includes(input.visibility)) throw Error('Vælg, hvem der kan åbne appen.');
   const c={provider:'komplai',mode:'static',directory:relative(input.directory||'public'),visibility:input.visibility,frontend:'.',api:''};
+  // En lokal bygning sker kun, når brugeren har valgt den. Uden valget udgives færdige filer som hidtil.
+  if(input.build===true) c.build=true;
   if(input.appId) { if(typeof input.appId!=='string'||!UUID.test(input.appId)) throw Error('Vælg en af dine apps hos komplai.'); c.appId=input.appId; return c; }
   const name=typeof input.name==='string'?input.name.trim():'';
   if(!name||name.length>100|| /[\x00-\x1f]/.test(name)) throw Error('Giv appen et navn på højst 100 tegn.');
   c.name=name;
+  // komplai kræver, at en ny offentlig app bekræftes med dens navn.
+  if(c.visibility==='public') { if(typeof input.confirmPublic!=='string'||input.confirmPublic.trim()!==name) throw Error('Skriv appens navn præcis for at bekræfte, at appen bliver offentlig.'); c.confirmPublic=name; }
   if(input.slug!==undefined) { if(input.slug!==''&&!validLabel(input.slug)) throw Error('Adressen kan ikke bruges. Brug 3 til 40 små bogstaver, tal og bindestreger. Ord som admin og www er reserveret.'); c.slug=input.slug; }
   return c;
 }
@@ -50,9 +55,23 @@ function validateArtifact(c,a) {
   if(c.mode==='functions'&&!names.includes(c.api+'/host.json')) throw Error('Functions-mappen mangler host.json. API’et skal være færdigbygget og selvstændigt; appen kører ingen lokal npm-installation.');
 }
 class Deployments {
-  constructor(store,{providers,github,fetcher,artifact=deploymentArtifact}={}) { this.store=store; this.providers=providers||{komplai:new KomplaiDeployment(store),vercel:new VercelDeployment(),azure:new AzureDeployment(),promte:new PromteDeployment(), 'github-pages':new GitHubPagesDeployment(github), cloudflare:new CloudflarePagesDeployment(github)}; this.fetcher=fetcher||((...args)=>fetch(...args));this.pagesFetcher=fetcher||fetchSite;this.artifact=artifact;this.reviews=new Map(); }
+  constructor(store,{providers,github,fetcher,artifact=deploymentArtifact,builder=buildSaved}={}) { this.store=store; this.providers=providers||{komplai:new KomplaiDeployment(store),vercel:new VercelDeployment(),azure:new AzureDeployment(),promte:new PromteDeployment({store}), 'github-pages':new GitHubPagesDeployment(github), cloudflare:new CloudflarePagesDeployment(github)}; this.fetcher=fetcher||((...args)=>fetch(...args));this.pagesFetcher=fetcher||fetchSite;this.artifact=artifact;this.builder=builder;this.builds=new Map();this.reviews=new Map(); }
   async state(root) { const p=await this.store.project(root); return {config:p.deploymentConfig||null,preference:p.startup?.hosting||'',last:p.deploymentLast||null}; }
+  /** Hvad komplai-udgivelsen bruger: projektets gemte opsætning, ellers en gemt byggemappe, en bygning eller public. */
+  async source(root) {
+    const saved=(await this.store.project(root)).deploymentConfig;
+    if(saved?.provider==='komplai'&&saved.directory) return {directory:saved.directory,build:saved.build===true,saved:true};
+    return komplaiSource(root);
+  }
   async material(root,config) {
+    if(config.provider==='komplai'&&config.build) {
+      // Den byggede app hører til præcis den gemte version. Gennemgang og upload bruger samme bygning.
+      const source=await this.artifact(root,'.'), cached=this.builds.get(root);
+      if(cached?.head===source.head&&cached.sourceHash===source.hash) return cached.artifact;
+      const artifact=await this.builder(source);
+      validateArtifact(config,artifact); this.builds.set(root,{head:source.head,sourceHash:source.hash,artifact});
+      return artifact;
+    }
     // Git-status, private filer og hemmeligheder kontrolleres før udbyderens filudvalg.
     const source=await this.artifact(root,config.directory);
     const artifact=config.provider==='promte'?preparePromteArtifact(source):source;
@@ -61,6 +80,7 @@ class Deployments {
   }
   async review(root,input) {
     const config=configuration(input), artifact=await this.material(root,config);
+    if(config.build) config.directory=artifact.directory;
     if(config.provider==='komplai') { const refused=refusedFiles(artifact.files); if(refused.length) throw Error(`komplai Run kan ikke modtage ${refused.length===1?'denne fil':'disse filer'}: ${refused.slice(0,5).join(', ')}${refused.length>5?' …':''}. Filnavne må kun have a-z, tal, bindestreg og punktum, og filtypen skal være en webside, et billede, en skrifttype eller lignende.`); }
     const target=await this.providers[config.provider].inspect(config,artifact);
     const token=randomUUID(); this.reviews.clear(); this.reviews.set(token,{root,config,head:artifact.head,hash:artifact.hash,targetHash:hash(target),expires:Date.now()+300000});
@@ -70,7 +90,7 @@ class Deployments {
     await this.store.saveProject(root,{deploymentConfig:config});
     const komplai=config.provider==='komplai';
     const pages=['github-pages','cloudflare'].includes(config.provider);
-    return {token,config,target,version,head:artifact.head,hash:artifact.hash,bytes:artifact.bytes,files:artifact.files.map(f=>f.file),excludedFiles:artifact.excludedFiles||[],environment:komplai?'komplai.run':config.provider==='azure'?'harness-test':pages?'production':config.provider==='promte'?'arbejdsområde':'preview',cost:['komplai','promte'].includes(config.provider)?`Kræver en betalt aftale med ${komplai?'komplai':'Promte'}. Forbruget følger organisationens aftale.`:'Forbrug og eventuelle omkostninger følger din hostingkonto. Appen har ingen verificeret pris eller automatisk udgiftsgrænse.',build:pages?'Starter én GitHub Actions-kørsel, som kontrollerer version og filer før udgivelse. Ingen automatisk udgivelse ved nye ændringer.':config.mode==='source'?'Udbyderen bygger kildekoden. Kontrollér afhængigheder og miljøværdier før udgivelsen.':'Færdige filer uploades. Der køres ingen projektkommando lokalt.',material:target.materialNote||(komplai?'De viste filer fra denne Git-version sendes til organisationens appmiljø hos komplai. Hemmelighedskontrollen er heuristisk og finder ikke alt.':'De viste filer fra denne Git-version sendes til hostingudbyderen. Hemmelighedskontrollen er heuristisk og finder ikke alt.')};
+    return {token,config,target,version,head:artifact.head,hash:artifact.hash,bytes:artifact.bytes,files:artifact.files.map(f=>f.file),excludedFiles:artifact.excludedFiles||[],built:artifact.built||null,environment:komplai?'komplai.run':config.provider==='azure'?'harness-test':pages?'production':config.provider==='promte'?'arbejdsområde':'preview',cost:komplai?'Forbruget følger organisationens aftale med komplai.':config.provider==='promte'?'Kræver en betalt aftale med Promte. Forbruget følger organisationens aftale.':'Forbrug og eventuelle omkostninger følger din hostingkonto. Appen har ingen verificeret pris eller automatisk udgiftsgrænse.',build:artifact.built?`Aura byggede appen på din computer fra den gemte version med ${artifact.built.install} og ${artifact.built.script}, uden pakkernes installationsscripts. Kun de færdige filer uploades.`:pages?'Starter én GitHub Actions-kørsel, som kontrollerer version og filer før udgivelse. Ingen automatisk udgivelse ved nye ændringer.':config.mode==='source'?'Udbyderen bygger kildekoden. Kontrollér afhængigheder og miljøværdier før udgivelsen.':'Færdige filer uploades. Der køres ingen projektkommando lokalt.',material:target.materialNote||(komplai&&artifact.built?'De viste filer er bygget fra denne Git-version og sendes til organisationens appmiljø hos komplai. Hemmelighedskontrollen er heuristisk og finder ikke alt.':komplai?'De viste filer fra denne Git-version sendes til organisationens appmiljø hos komplai. Hemmelighedskontrollen er heuristisk og finder ikke alt.':'De viste filer fra denne Git-version sendes til hostingudbyderen. Hemmelighedskontrollen er heuristisk og finder ikke alt.')};
   }
   async settings(root) {
     const {config}=await this.state(root);

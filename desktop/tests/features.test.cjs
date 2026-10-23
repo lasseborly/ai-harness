@@ -127,13 +127,26 @@ test('motorens skillmappe skrives forfra og tager kun gyldige skills', async t =
 test('appens regler følger funktionerne', () => {
   const all = { versioner: true, planlaegning: true, design: true, sikkerhed: true, kvalitet: true, deling: true };
   const full = appRules(all, { skills: ['harness-kodestil'], links: ['https://design.example'], autoCheckpoint: true });
-  assert.match(full, /gemmer selv en version efter hver AI-opgave/); assert.match(full, /Del-knap/); assert.match(full, /designlinks/); assert.match(full, /skill-værktøjet: harness-kodestil/);
+  assert.match(full, /gemmer selv en version efter hver AI-opgave/); assert.match(full, /Udgiv-knap/); assert.match(full, /designlinks/); assert.match(full, /skill-værktøjet: harness-kodestil/);
   assert.doesNotMatch(full, /planlægning før bygning fra/);
   const none = appRules({ ...all, versioner: false, deling: false, planlaegning: false, design: false }, { links: ['https://design.example'], mode: 'free' });
-  assert.match(none, /slået versioner fra/); assert.match(none, /Deling og udgivelse er slået fra/); assert.match(none, /Byg direkte/); assert.match(none, /ikke slået skills fra Aura Harness til/);
+  assert.match(none, /slået versioner fra/); assert.match(none, /Udgivelse er slået fra/); assert.match(none, /Byg direkte/); assert.match(none, /ikke slået skills fra Aura Harness til/);
   assert.doesNotMatch(none, /designlinks/);
   assert.match(appRules(all, { autoCheckpoint: false }), /Brugeren gemmer versioner i appen/);
   for (const text of [full, none]) assert.match(text, /Bed aldrig om API-nøgler/);
   assert.doesNotMatch(full, /integrationer til/);
   assert.match(appRules(all, { integrations: ['Adresser', 'CVR'] }), /slået disse integrationer til: Adresser, CVR\. .*\.env/);
+});
+
+// Et Promte-login gør Udgiv anbefalet, så brugeren kan udgive den app, Aura har forbundet til Promte.
+test('et Promte-login slår Udgivelse til som standard, men respekterer et eget valg', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'harness-promte-deling-')); t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const library = await loadLibrary(profiles), store = new Store(path.join(root, 'appdata'));
+  const features = new Features(store, async () => library);
+  assert.equal((await features.get(null)).effective.deling, false);
+  await store.update(state => { state.hosting = { ...state.hosting, promte: { 'https://kodning.promte.dk': { secret: 'krypteret', email: 'test@example.invalid', expiresAt: '2099-01-01T00:00:00.000Z' } } }; });
+  const after = await features.get(null);
+  assert.equal(after.effective.deling, true); assert.equal(after.effective.versioner, true, 'Udgiv kræver versioner');
+  await features.save(null, { scope: 'alle', chosen: 'valgt', values: { versioner: true, planlaegning: false, design: false, sikkerhed: false, kvalitet: false, deling: false } });
+  assert.equal((await features.get(null)).effective.deling, false, 'brugerens eget fravalg gælder');
 });

@@ -5,13 +5,15 @@ const { run, protectedPath, secretContent } = require('./git.cjs');
 
 // En udgivelse læses fra Git-objekter, aldrig fra tilfældige buildfiler på disken.
 // Adapteren afgør efterfølgende, hvilke projekttyper og konfigurationer den understøtter.
+// Udgiv kan sættes op, mens appen bygges; selve udgivelsen bruger altid den seneste gemte version.
+const NO_VERSION = 'Gem en version af appen, før du udgiver. Udgiv bruger altid den seneste gemte version.';
 async function deploymentArtifact(root, directory = '.') {
   if (typeof directory !== 'string' || !directory || directory.includes('\\') || directory.includes('\0') || directory.startsWith('/') || directory.split('/').some(p => p === '..') || path.posix.normalize(directory) !== directory) throw new Error('Vælg en relativ projektmappe uden .. eller særlige stitegn.');
   root = await fs.realpath(root);
-  const top = (await run(root, ['rev-parse', '--show-toplevel'])).toString().trim();
+  const top = (await run(root, ['rev-parse', '--show-toplevel']).catch(() => { throw new Error(NO_VERSION); })).toString().trim();
   if (await fs.realpath(top) !== root) throw new Error('Åbn Git-repositoryets rodmappe før udgivelse.');
   if ((await run(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])).length) throw new Error('Gem eller gennemgå lokale ændringer før udgivelse.');
-  const head = (await run(root, ['rev-parse', '--verify', 'HEAD'])).toString().trim();
+  const head = (await run(root, ['rev-parse', '--verify', 'HEAD']).catch(() => { throw new Error(NO_VERSION); })).toString().trim();
   const [name, at] = (await run(root, ['log', '-1', '--format=%s%x00%cI', head])).toString().trim().split('\0');
   const prefix = directory === '.' ? '' : directory + '/';
   const entries = (await run(root, ['ls-tree', '-rz', '--full-tree', head])).toString('utf8').split('\0').filter(Boolean);

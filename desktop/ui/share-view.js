@@ -73,6 +73,6 @@
     else if (c?.site?.status === 'answered') verification = { title: c.site.http >= 200 && c.site.http < 300 ? 'Startsiden svarer' : 'Kontrollér startsiden', detail: 'Indholdet er ikke bekræftet. Se kontrollens detaljer.', tone: c.site.http >= 400 ? 'warning' : 'neutral' };
     return { publication, access, verification };
   }
-  const scope = c => c?.copyCount ? `Deling bruger projektets gemte version. ${c.copyCount === 1 ? 'En samtalekopi er' : `${c.copyCount} samtalekopier er`} endnu ikke flettet ind og kommer ikke med. Vælg Flet ind i projektet, hvis rettelserne skal med.` : 'Deling bruger projektets gemte version. Ugemte rettelser kommer ikke med.';
+  const scope = c => c?.copyCount ? `Udgivelsen bruger projektets gemte version. ${c.copyCount === 1 ? 'En samtalekopi er' : `${c.copyCount} samtalekopier er`} endnu ikke flettet ind og kommer ikke med. Gennemgå ændringerne og flet dem ind, hvis de skal med.` : 'Udgivelsen bruger projektets gemte version. Ugemte rettelser kommer ikke med.';
   return { time, version, provider, destination, checks, identity, receiptSummary, scope };
 });

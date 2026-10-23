@@ -178,3 +178,14 @@ test('Azure kan skelne tom app-liste fra afvist login eller adgang', async t => 
   failed = true;
   await assert.rejects(setup.act(root, input), /kunne ikke hentes/);
 });
+
+test('Udgiv spørger før Promte-login, om projektet er en Promte-app, og forklarer det i almindeligt dansk', async t => {
+  const { root, store } = await fixture(t);
+  const setup = new DeploymentSetup(store, {}, {}, { promte: { state: async () => { throw Error('Login må ikke læses under kontrollen'); } } });
+  await fs.mkdir(path.join(root, 'public')); await fs.writeFile(path.join(root, 'public/index.html'), '<h1>Side</h1>');
+  const { problem } = await setup.act(root, { action: 'promte-check' });
+  assert.equal(problem.kind, 'website'); assert.match(problem.summary, /almindelig hjemmeside/); assert.match(problem.detail, /package\.json/);
+  await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({ private: true, scripts: { build: 'vite build' }, devDependencies: { react: '19.2.8' } }));
+  await fs.writeFile(path.join(root, 'index.html'), '<div id="root"></div>');
+  assert.deepEqual(await setup.act(root, { action: 'promte-check' }), { problem: null });
+});

@@ -1,0 +1,245 @@
+// Rigtig Electron og OpenCode med tre syntetiske projekter og kontrollerede lokale modelsvar.
+// Ingen Git-skrivninger, eksterne modelkald eller udgivelser. Prøvens filer bliver i en ny midlertidig mappe.
+const { _electron: electron } = require('playwright');
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const os = require('node:os');
+const http = require('node:http');
+const { createRequire } = require('node:module');
+const helpers = require('./ui-test-helpers.cjs');
+
+(async () => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'aura-flere-projekter-')));
+  const bundle = process.env.HARNESS_TEST_PACKAGE && path.resolve(process.env.HARNESS_TEST_PACKAGE);
+  const executablePath = bundle ? (bundle.endsWith('.app') ? path.join(bundle, 'Contents/MacOS', path.basename(bundle, '.app')) : bundle) : require('electron');
+  const platformPath = process.platform === 'win32' ? path.join(process.env.SystemRoot, 'System32') : '/usr/bin:/bin:/usr/sbin:/sbin';
+  const projects = await Promise.all(['Alfa', 'Beta', 'Gamma'].map(async (name, index) => {
+    const folder = path.join(root, name), file = path.join(folder, 'public', 'index.html');
+    await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, `<h1>${name} før</h1>`);
+    return { name, root: folder, file, model: `test-${index}` };
+  }));
+  const requests = [], held = new Map(), errors = [], checks = [];
+  const server = http.createServer(async (req, res) => {
+    if (req.url === '/v1/models') return res.end(JSON.stringify({ data: projects.map(item => ({ id: item.model, name: item.name })) }));
+    if (req.url !== '/v1/chat/completions') { res.writeHead(404); return res.end(); }
+    try {
+      let raw = ''; for await (const chunk of req) raw += chunk;
+      const body = JSON.parse(raw), project = projects.find(item => item.model === body.model);
+      requests.push({ body, authorization: req.headers.authorization });
+      if (!project) { res.writeHead(400); return res.end('Ukendt syntetisk model'); }
+      const reply = (delta, finish = 'stop') => {
+        if (res.destroyed) return;
+        res.setHeader('content-type', 'text/event-stream');
+        const frame = { id: 'test-' + requests.length, object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta: { role: 'assistant', ...delta }, finish_reason: null }] };
+        res.write('data: ' + JSON.stringify(frame) + '\n\n');
+        res.write('data: ' + JSON.stringify({ ...frame, choices: [{ index: 0, delta: {}, finish_reason: finish }], usage: { prompt_tokens: 20, completion_tokens: 10 } }) + '\n\n'); res.end('data: [DONE]\n\n');
+      };
+      if (!body.tools?.length) return reply({ content: project.name });
+      const lastUser = [...body.messages].reverse().find(message => message.role === 'user');
+      if (JSON.stringify(lastUser?.content).includes('konkret cykelforslag')) return reply({ content: '## Det bygger vi\nEn cykeloversigt.\n## Sådan skal det se ud\nBlå kort.\n## Teknik og data\nLokale prøveværdier.\n## Det skal du prøve (i forhåndsvisningen)\nTilføj en cykel.\n<!-- aura:offer-plan -->' });
+      if (JSON.stringify(lastUser?.content).includes('Byg første udkast efter den plan')) return reply({ content: 'Cykelforslaget er taget med direkte til bygning.' });
+      if (JSON.stringify(lastUser?.content).includes('17 blå cykler')) return reply({ content: 'Vi bygger en oversigt med antal og farve for cyklerne.' });
+      if (JSON.stringify(lastUser?.content).includes('Sæt i gang!') || JSON.stringify(lastUser?.content).includes('Fortsæt med cyklerne')) return reply({ content: 'Jeg fortsætter med den aftalte cykeloversigt.' });
+      if (JSON.stringify(lastUser?.content).includes('automatisk projektfil')) {
+        if (body.messages.at(-1)?.role === 'tool') return reply({ content: 'Projektfilen er skrevet med den valgte tilladelse.' });
+        return reply({ tool_calls: [{ index: 0, id: 'autofil', type: 'function', function: { name: 'write', arguments: JSON.stringify({ filePath: path.join(project.root, 'automatisk.txt'), content: 'Tilladt projektfil' }) } }] }, 'tool_calls');
+      }
+      if (JSON.stringify(lastUser?.content).includes('husket kommando')) {
+        if (body.messages.at(-1)?.role === 'tool') return reply({ content: 'Den præcise huskede kommando er udført.' });
+        return reply({ tool_calls: [{ index: 0, id: 'husket', type: 'function', function: { name: 'bash', arguments: JSON.stringify({ command: "node -e \"require('node:fs').writeFileSync('husket-resultat.json',JSON.stringify({nøgle:Boolean(process.env.OPENCODE_CONFIG_CONTENT)}))\"", workdir: project.root, description: 'Prøver en præcis husket kommando' }) } }] }, 'tool_calls');
+      }
+      if (JSON.stringify(lastUser?.content).includes('isoleret kommando')) {
+        if (body.messages.at(-1)?.role === 'tool') return reply({ content: 'Den isolerede kommando er udført.' });
+        return reply({ tool_calls: [{ index: 0, id: 'isoleret', type: 'function', function: { name: 'bash', arguments: JSON.stringify({ command: "node -e \"const fs=require('node:fs');fs.writeFileSync('isolationsresultat.json',JSON.stringify({nøgle:Boolean(process.env.OPENCODE_CONFIG_CONTENT),ok:true}))\"", workdir: project.root, description: 'Prøver isoleret projektarbejde' }) } }] }, 'tool_calls');
+      }
+      if (JSON.stringify(lastUser?.content).includes('Svar igen med ny nøgle')) { held.set('compact', () => reply({ content: project.name + ' efter sammenfatning.' })); res.on('close', () => held.delete('compact')); return; }
+      if (JSON.stringify(lastUser?.content).includes('ny nøgle')) return reply({ content: project.name + ' bruger den nye nøgle.' });
+      if (body.messages.at(-1)?.role === 'tool') {
+        held.set(project.model, () => reply({ content: project.name + ' er færdig. Prøv forhåndsvisningen.' }));
+        res.on('close', () => held.delete(project.model)); return;
+      }
+      reply({ tool_calls: [{ index: 0, id: 'skriv-' + project.model, type: 'function', function: { name: 'write', arguments: JSON.stringify({ filePath: project.file, content: `<h1>${project.name} efter</h1>` }) } }] }, 'tool_calls');
+    } catch (error) { errors.push(error.message); if (!res.destroyed) { res.writeHead(500); res.end('Syntetisk serverfejl'); } }
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  let app, page;
+  const check = text => { checks.push(text); console.log('Bestået: ' + text); };
+  const waitHeld = async model => { for (let n = 0; n < 600 && !held.has(model); n++) await new Promise(resolve => setTimeout(resolve, 100)); assert.ok(held.has(model), 'modellen afventer kontrolleret svar'); };
+  const call = async (method, input) => { const result = await page.evaluate(({ method, input }) => window.harness[method](input), { method, input }); assert.equal(result.ok, true, result.error); return result.value; };
+  const idle = async () => { for (let n = 0; n < 600; n++) { if (!(await call('connectionState')).running) return; await new Promise(resolve => setTimeout(resolve, 100)); } assert.fail('opgaven afslutter ikke'); };
+  const active = project => page.waitForFunction(folder => document.querySelector('#project-path').textContent === folder, project.root);
+  const switchTo = async project => { await page.locator('#project-list .project-name').filter({ hasText: project.name }).click(); await active(project); };
+  const send = async text => {
+    await page.fill('#prompt', text); await page.click('#send');
+    await page.waitForFunction(() => document.querySelector('#data-dialog').open || !document.querySelector('#stop').hidden);
+    if (await page.locator('#data-dialog').evaluate(element => element.open)) await page.click('#accept-send');
+  };
+  const allow = async () => {
+    const once = page.locator('#approvals button').filter({ hasText: /^Kun denne fil$|^Tillad én gang$|^Tillad denne gang$/ });
+    await once.first().waitFor(); await once.first().click();
+  };
+  try {
+    if (bundle) {
+      const resources = bundle.endsWith('.app') ? path.join(bundle, 'Contents', 'Resources') : path.join(path.dirname(bundle), 'resources');
+      const modules = path.join(resources, 'app.asar.unpacked', 'node_modules');
+      const bundledRequire = createRequire(path.join(modules, '@opencode-ai', 'plugin', 'package.json'));
+      assert.equal(typeof bundledRequire('cross-spawn'), 'function', 'den eksterne runtime indlæser hele cross-spawn-kæden uden Electron/asar');
+      const dependencyRequire = createRequire(bundledRequire.resolve('cross-spawn'));
+      assert.ok(dependencyRequire.resolve('which').startsWith(modules + path.sep));
+      check('pakkens eksterne runtime kan indlæse SDK-afhængigheder efter electron-builders flytning af moduler');
+    }
+    app = await electron.launch({ executablePath, args: [...(bundle ? [] : [path.join(__dirname, '..')]), '--user-data-dir=' + path.join(root, 'appdata')], env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined, ...(bundle ? { PATH: platformPath, HARNESS_OPENCODE_PATH: '' } : {}) } });
+    await helpers.forbidGitWrites(app);
+    await app.evaluate(({ app }) => {
+      const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
+      const { OpenCodeEngine } = require('./core/engine.cjs'), handle = OpenCodeEngine.prototype.handleEvent;
+      globalThis.multiProjectEngineEvents = [];
+      OpenCodeEngine.prototype.handleEvent = function(event) { globalThis.multiProjectEngineEvents.push({ at: Date.now(), type: event.type, recovered: event.recovered === true, compacting: Boolean(this.compaction), root: this.root }); if (globalThis.dropProjectIdle === this.root && !event.recovered && (event.type === 'session.idle' || event.type === 'session.status' && event.properties?.status?.type === 'idle')) return; return handle.call(this, event); };
+    });
+    await app.evaluate(() => {
+      const original = globalThis.fetch;
+      globalThis.fetch = (url, options) => { if (!/^http:\/\/127\.0\.0\.1:\d+\//.test(String(url))) throw Error('Prøven tillader kun lokal netadgang.'); return original(url, options); };
+    });
+    page = await app.firstWindow(); page.on('pageerror', error => errors.push(error.message));
+    await helpers.skipIntroduction(page); page.setDefaultTimeout(90000); await helpers.enableSharing(page);
+    const connection = await helpers.addConnection(page, { name: 'Tre kontrollerede modeller', baseURL: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'syntetisk-før' });
+    await page.evaluate(() => { window.multiProjectEvents = []; window.harness.onEvent(event => window.multiProjectEvents.push(event)); });
+    for (const project of projects) {
+      await helpers.openExistingProject(app, page, project.root); await helpers.taskOptions(page);
+      await page.selectOption('#connection-select', connection.id);
+      await page.waitForFunction(model => [...document.querySelector('#model-select').options].some(option => option.value === model), project.model);
+      if (!await page.locator('#model-catalog').evaluate(element => element.open)) await page.click('#model-catalog > summary');
+      await page.selectOption('#model-select', project.model); await helpers.selectMode(page, 'free');
+      await send('Byg siden for ' + project.name);
+      await page.locator('#approvals .approval').first().waitFor();
+      assert.equal(await page.locator('#open').isEnabled(), true); assert.equal(await page.locator('#new').isEnabled(), true);
+      project.chat = (await call('connectionState')).chat;
+    }
+    const list = await call('recentProjects');
+    for (const project of projects) assert.equal(list.find(item => item.root === project.root).chats.find(item => item.id === project.chat).running, true);
+    assert.deepEqual(new Set(requests.filter(item => item.body.tools?.length).map(item => item.body.model)), new Set(projects.map(item => item.model)));
+    check('tre projekter med hver sin model arbejder samtidigt og venter på hver sin godkendelse');
+    await helpers.menuClick(page, '#features-button'); assert.equal(await page.locator('#features-dialog').evaluate(element => element.open), true);
+    await call('featuresSave', { scope: 'projekt', values: { design: false } });
+    await page.click('[data-close="features-dialog"]');
+    await page.click('#deploy-button'); await page.locator('#deployment-dialog').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#deployment-fields').isDisabled(), false);
+    await page.screenshot({ path: path.join(root, 'udgiv-under-arbejde.png'), animations: 'disabled' });
+    await page.click('[data-close="deployment-dialog"]');
+    await helpers.previewOptions(page); assert.equal(await page.locator('#attach-preview').isEnabled(), true); await page.keyboard.press('Escape');
+    await call('saveConnection', { id: connection.id, kind: 'compatible', name: 'Ny nøgle til næste opgave', baseURL: connection.baseURL, apiKey: 'syntetisk-efter' });
+    const removed = await page.evaluate(id => window.harness.removeConnection(id), connection.id); assert.equal(removed.ok, false); assert.match(removed.error, /bruges af en opgave/);
+    check('Indstillinger, Udgiv og preview kan åbnes under arbejdet; forbindelse kan ændres, men ikke fjernes i brug');
+    for (const project of projects) {
+      await switchTo(project);
+      assert.match(await page.locator('#approvals').textContent(), /index\.html/);
+      await allow(); await waitHeld(project.model);
+      assert.match(await fs.readFile(project.file, 'utf8'), new RegExp(project.name + ' efter'));
+    }
+    assert.equal(requests.filter(item => item.body.tools?.length).every(item => item.authorization === 'Bearer syntetisk-før'), true, 'alle aktive gatewaykald bruger den oprindelige nøgle');
+    // Alfa afslutter i baggrunden, mens Gamma stadig arbejder og vises.
+    held.get(projects[0].model)();
+    await page.waitForFunction(chat => window.multiProjectEvents.some(event => event.type === 'run.status' && event.chat === chat && event.status === 'idle'), projects[0].chat);
+    assert.equal(await page.locator('#project-path').textContent(), projects[2].root);
+    assert.doesNotMatch(await page.locator('#messages').textContent(), /Alfa er færdig/);
+    const background = await page.evaluate(chat => window.multiProjectEvents.filter(event => event.chat === chat), projects[0].chat);
+    assert.equal(background.every(event => event.root === projects[0].root), true);
+    await page.screenshot({ path: path.join(root, 'tre-projekter.png'), animations: 'disabled' });
+    await switchTo(projects[0]); await page.locator('#messages').filter({ hasText: 'Alfa er færdig' }).waitFor();
+    assert.equal(await page.inputValue('#model-select'), projects[0].model);
+    check('baggrundssvar og filændringer bliver i deres projekt; projektskift bevarer modelvalg og motorer');
+    await app.evaluate(({ app }) => {
+      const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
+      const { Workbench } = require('./core/workbench.cjs'), state = Workbench.prototype.state;
+      globalThis.holdNextOwnerState = true;
+      Workbench.prototype.state = async function(...args) { if (globalThis.holdNextOwnerState) { globalThis.holdNextOwnerState = false; globalThis.ownerStateEntered = true; await new Promise(resolve => { globalThis.releaseOwnerState = resolve; }); } return state.apply(this, args); };
+    });
+    const delayedState = call('connectionState');
+    for (let n = 0; n < 100 && !await app.evaluate(() => globalThis.ownerStateEntered); n++) await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(await app.evaluate(() => globalThis.ownerStateEntered), true);
+    await switchTo(projects[1]); await app.evaluate(() => globalThis.releaseOwnerState());
+    assert.equal((await delayedState).chat, projects[0].chat); assert.equal(await page.locator('#project-path').textContent(), projects[1].root);
+    await switchTo(projects[0]);
+    check('et forsinket IPC-svar beholder sin oprindelige samtale, mens et andet projekt åbnes');
+    await send('Svar med ny nøgle'); await page.locator('#messages').filter({ hasText: 'Alfa bruger den nye nøgle' }).waitFor(); await page.locator('#stop').waitFor({ state: 'hidden' });
+    assert.equal(requests.filter(item => item.body.tools?.length).at(-1).authorization, 'Bearer syntetisk-efter');
+    const compact = await call('prepare', { chat: projects[0].chat, connectionID: connection.id, modelID: projects[0].model, mode: 'free' });
+    const beforeCompact = requests.length;
+    await call('send', { chat: projects[0].chat, fingerprint: compact.fingerprint, text: 'Svar igen med ny nøgle', compact: true });
+    await waitHeld('compact');
+    assert.equal((await call('connectionState')).running, true, 'ny opgave er stadig aktiv efter sammenfatningens idle');
+    held.get('compact')();
+    await idle();
+    assert.equal((await call('activityList', { chat: projects[0].chat })).some(entry => entry.title === 'Samtalen er gjort kortere'), true);
+    assert.ok(requests.slice(beforeCompact).some(item => !item.body.tools?.length), 'den rigtige motor gennemfører sammenfatningskaldet');
+    assert.ok(requests.slice(beforeCompact).some(item => item.body.tools?.length), 'motoren sender brugerens nye besked bagefter');
+    check('den rigtige motor sammenfatter samtalen og sender derefter den nye opgave uden at genbruge sammenfatningens idle');
+    for (const project of projects.slice(1)) held.get(project.model)();
+    await page.waitForFunction(chats => chats.every(chat => window.multiProjectEvents.some(event => event.type === 'run.status' && event.chat === chat && event.status === 'idle')), projects.map(item => item.chat));
+    check('næste opgave bruger den ændrede nøgle, mens de øvrige projekter afslutter deres oprindelige kald');
+    await app.evaluate((_electron, root) => { globalThis.dropProjectIdle = root; }, projects[0].root);
+    const recovery = await call('prepare', { chat: projects[0].chat, connectionID: connection.id, modelID: projects[0].model, mode: 'free' });
+    await call('send', { chat: projects[0].chat, fingerprint: recovery.fingerprint, text: 'Afslut med ny nøgle og tabt idle' });
+    for (let n = 0; n < 100 && !await app.evaluate(() => globalThis.multiProjectEngineEvents.some(event => event.recovered)); n++) await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(await app.evaluate(() => globalThis.multiProjectEngineEvents.some(event => event.recovered)), true);
+    await idle();
+    await app.evaluate(() => { globalThis.dropProjectIdle = null; });
+    check('afsluttet modelsvar frigiver opgaven gennem serverstatus, selv når begge idle-events mangler');
+    const idea = await call('prepare', { chat: projects[0].chat, connectionID: connection.id, modelID: projects[0].model, mode: 'chat' });
+    await call('send', { chat: projects[0].chat, fingerprint: idea.fingerprint, text: 'Jeg vil have en app til 17 blå cykler.' });
+    await idle();
+    for (const text of ['Sæt i gang!', 'Fortsæt med cyklerne']) {
+      const build = await call('prepare', { chat: projects[0].chat, connectionID: connection.id, modelID: projects[0].model, mode: 'free', includeHistory: false });
+      await call('send', { chat: projects[0].chat, fingerprint: build.fingerprint, text });
+      await idle();
+      const sent = requests.filter(item => item.body.tools?.length).at(-1).body.messages;
+      assert.equal(JSON.stringify(sent).match(/17 blå cykler/g)?.length, 1, 'idéen følger med én gang i den faktiske modelrequest');
+      assert.doesNotMatch(JSON.stringify(sent), /Aktuel arbejdsmåde: Samtale/);
+    }
+    check('Samtale til Byg med Sæt i gang bevarer den tidligere idé i modelrequest og næste besked');
+    const beforePlan = requests.length, proposal = await call('prepare', { chat: projects[0].chat, connectionID: connection.id, modelID: projects[0].model, mode: 'chat' });
+    await call('send', { chat: projects[0].chat, fingerprint: proposal.fingerprint, text: 'Giv et konkret cykelforslag' }); await idle();
+    assert.ok((await call('connectionState')).plan); assert.equal(await page.locator('#plan-offer').isVisible(), false);
+    await page.click('#build-plan'); await page.waitForFunction(() => document.querySelector('#data-dialog').open || !document.querySelector('#stop').hidden);
+    if (await page.locator('#data-dialog').evaluate(element => element.open)) await page.click('#accept-send');
+    await page.locator('#messages').filter({ hasText: 'Cykelforslaget er taget med direkte til bygning.' }).waitFor(); await idle();
+    assert.equal(requests.slice(beforePlan).filter(item => item.body.tools?.length).length, 2);
+    check('et konkret forslag i Samtale får direkte Byg-knap uden endnu en planrunde');
+    await call('saveProjectSettings', { autoProjectFiles: true });
+    const fileStart = await page.evaluate(() => window.multiProjectEvents.length), filePermission = await call('prepare', { chat: projects[0].chat, connectionID: connection.id, modelID: projects[0].model, mode: 'free' });
+    await call('send', { chat: projects[0].chat, fingerprint: filePermission.fingerprint, text: 'Skriv en automatisk projektfil' });
+    await page.waitForFunction(start => window.multiProjectEvents.slice(start).some(event => event.type === 'permission.auto' && event.policy?.projectFile), fileStart, { timeout: 10000 }); await idle();
+    assert.equal(await fs.readFile(path.join(projects[0].root, 'automatisk.txt'), 'utf8'), 'Tilladt projektfil');
+    check('automatisk projektfiladgang virker gennem den rigtige motors tilladelsesforespørgsel');
+    await call('saveProjectSettings', { autoCommands: true });
+    const isolated = await call('prepare', { chat: projects[0].chat, connectionID: connection.id, modelID: projects[0].model, mode: 'free' });
+    await call('send', { chat: projects[0].chat, fingerprint: isolated.fingerprint, text: 'Kør isoleret kommando' });
+    await page.waitForFunction(() => window.multiProjectEvents.some(event => event.type === 'permission.auto' && event.policy?.kind === 'bash'));
+    await idle();
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(projects[0].root, 'isolationsresultat.json'), 'utf8')), { nøgle: false, ok: true });
+    check('rigtig OpenCode-plugin kører automatisk bash med OS-isolation og uden modelcredentials');
+    await call('saveProjectSettings', { autoCommands: false });
+    const commandStart = await page.evaluate(() => window.multiProjectEvents.length), remember = await call('prepare', { chat: projects[0].chat, connectionID: connection.id, modelID: projects[0].model, mode: 'free' });
+    await call('send', { chat: projects[0].chat, fingerprint: remember.fingerprint, text: 'Prøv en husket kommando' });
+    await page.waitForFunction(start => window.multiProjectEvents.slice(start).some(event => event.type === 'permission.asked' && event.properties?.policy?.kind === 'bash'), commandStart);
+    const permission = await page.evaluate(() => window.multiProjectEvents.filter(event => event.type === 'permission.asked' && event.properties?.policy?.kind === 'bash').at(-1).properties);
+    assert.equal(permission.policy.persistable, true); await call('reply', { chat: projects[0].chat, id: permission.id, allow: true, scope: 'project' }); await idle();
+    const rememberedStart = await page.evaluate(() => window.multiProjectEvents.length), remembered = await call('prepare', { chat: projects[0].chat, connectionID: connection.id, modelID: projects[0].model, mode: 'free' });
+    await call('send', { chat: projects[0].chat, fingerprint: remembered.fingerprint, text: 'Prøv igen en husket kommando' });
+    await page.waitForFunction(start => window.multiProjectEvents.slice(start).some(event => event.type === 'permission.auto' && event.source === 'rule' && event.policy?.kind === 'bash'), rememberedStart, { timeout: 15000 }); await idle();
+    assert.equal(JSON.parse(await fs.readFile(path.join(projects[0].root, 'husket-resultat.json'), 'utf8')).nøgle, false);
+    check('en præcis husket kommando genbruges kun gennem aktiv OS-isolation, selv når bred automatisk kørsel er slået fra');
+    const archived = await call('chatArchive', { id: projects[0].chat, archived: true }); assert.notEqual(archived.chat, projects[0].chat);
+    assert.equal((await call('recentProjects')).find(item => item.root === projects[0].root).chats.find(item => item.id === projects[0].chat).archived, true);
+    await call('chatArchive', { id: projects[0].chat, archived: false });
+    check('arkivering og gendannelse bevarer den afsluttede samtale');
+    await helpers.assertNoGitWrites(app); assert.deepEqual(errors, []);
+    const report = { status: 'bestået', root, packaged: Boolean(bundle), bundle: bundle || null, checks, models: projects.map(item => item.model), requests: requests.length, errors, limits: 'Kontrollerede lokale modeller og syntetiske projekter; ingen ekstern AI, cloududgivelse eller Git-skrivning.' };
+    await fs.writeFile(path.join(root, 'rapport.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2));
+  } catch (error) {
+    if (page) await page.screenshot({ path: path.join(root, 'fejl.png'), animations: 'disabled' }).catch(() => {});
+    await fs.writeFile(path.join(root, 'diagnose.json'), JSON.stringify({ requests: requests.map(({ body }) => ({ model: body.model, tools: body.tools?.length || 0, messages: body.messages })), events: app ? await app.evaluate(() => globalThis.multiProjectEngineEvents).catch(() => []) : [], permissions: page ? await page.evaluate(() => window.multiProjectEvents?.filter(event => event.type.startsWith('permission.'))).catch(() => []) : [] }, null, 2));
+    console.error(JSON.stringify({ status: 'fejl', root, checks, errors, error: error.message }, null, 2)); throw error;
+  } finally { await app?.close().catch(() => {}); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+})().catch(error => { console.error(error); process.exitCode = 1; });

@@ -9,6 +9,7 @@ async function until(check) { for (let i = 0; i < 200; i++) { if (await check())
 async function fixture(t, pkg = { scripts: { dev: 'vite' }, devDependencies: { vite: '8.3.1' } }) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'harness-server-test-'));
   await fs.writeFile(path.join(root, 'package.json'), JSON.stringify(pkg));
+  await fs.writeFile(path.join(root, '.npmrc'), `cache=${path.join(root, '.npm-cache')}\n`);
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return root;
 }
@@ -25,10 +26,12 @@ test('genkendelse skriver intet og udfører aldrig package-scripts eller konfigu
   await fs.writeFile(path.join(root, 'package.json'), '{');
   assert.equal((await inspect(root)).supported, false);
 });
-test('sammensatte scripts og arbejdsområder kræver manuel tilslutning', async t => {
-  for (const pkg of [{ scripts: { dev: 'vite && touch /tmp/no' }, dependencies: { vite: '8' } }, { workspaces: ['apps/*'], scripts: { dev: 'vite' }, dependencies: { vite: '8' } }, { scripts: { dev: 'next dev' }, dependencies: { next: '15' } }]) {
-    assert.equal((await inspect(await fixture(t, pkg))).supported, false);
+test('npm-kommandoer kommer til gennemgang; ukendte arbejdsområder starter ikke automatisk', async t => {
+  for (const script of ['vite && echo slut', 'next dev']) {
+    const project = await inspect(await fixture(t, { scripts: { dev: script } }));
+    assert.equal(project.supported, true); assert.equal(project.kind, 'services'); assert.equal(project.services[0].declaredScript, script);
   }
+  assert.equal((await inspect(await fixture(t, { workspaces: ['apps/*'], scripts: { dev: 'vite' }, dependencies: { vite: '8' } }))).supported, false);
 });
 test('godkendelse binder handlingen til uændret opsætning og kan ikke genbruges', async t => {
   const root = await fixture(t), manager = new DevServer();

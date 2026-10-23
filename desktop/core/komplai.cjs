@@ -4,10 +4,10 @@ const { randomBytes, createHash, timingSafeEqual } = require('node:crypto');
 const API = 'https://api.komplai.dk/v1/aura';
 const ISSUER = 'https://auth.komplai.dk';
 const messages = {
-  aura_not_configured: 'komplai-login er ikke åbnet endnu. Kontakt komplai, eller vælg en anden forbindelse.',
+  aura_not_configured: 'komplai-login er ikke åbnet endnu. Vælg en anden forbindelse, eller prøv igen senere.',
   insufficient_scope: 'Denne konto har ikke adgang til komplai Run.',
   invalid_token: 'Adgangen blev afvist. Log ind med komplai igen.',
-  publishing_not_enabled: 'Din organisation har ikke komplai Run. Bed jeres administrator kontakte komplai.',
+  publishing_not_enabled: 'Din organisation har ikke komplai Run. Bed jeres administrator om adgang.',
   key_limit: 'Du har for mange aktive udgivelsesadgange. Log ud på en anden computer, eller vent til en adgang udløber.',
 };
 const PUBLISH_GRANT = /^komp_publish_grant_[a-f0-9]{64}$/;
@@ -34,6 +34,16 @@ async function readBounded(response, maxBytes) {
 }
 const same = (a, b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
+// Siden, browseren viser efter login. Den er selvstændig: ingen scripts, eksterne filer eller data fra adressen,
+// og stilen er tilladt med sin hash i Content-Security-Policy. Lyst og mørkt tema følger browseren.
+const CALLBACK_STYLE = ':root{color-scheme:light dark;--ink:#182235;--muted:#58677d;--surface:#fff;--canvas:#f8fafc;--line:#e0e7f0}@media (prefers-color-scheme:dark){:root{--ink:#e8edf5;--muted:#9aa8bd;--surface:#161e2e;--canvas:#0d1320;--line:#26324a}svg{border-radius:14px;box-shadow:0 0 0 1px #34425f}}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--canvas);color:var(--ink);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{width:100%;max-width:400px;padding:36px 32px 32px;border:1px solid var(--line);border-radius:16px;background:var(--surface);text-align:center;box-shadow:0 12px 32px #0f172a14}svg{display:block;margin:0 auto 20px}h1{margin:0 0 8px;font-size:20px;line-height:1.3;letter-spacing:-.01em}p{margin:0;color:var(--muted)}';
+const CALLBACK_CSP = `default-src 'none'; style-src 'sha256-${createHash('sha256').update(CALLBACK_STYLE).digest('base64')}'; frame-ancestors 'none'`;
+const AURA_MARK = '<svg width="56" height="56" viewBox="0 0 56 56" aria-hidden="true"><rect width="56" height="56" rx="14" fill="#14203a"/><path d="M20.7 14.9A15 15 0 1 0 40.4 19.6" fill="none" stroke="#1bb886" stroke-width="4.6" stroke-linecap="round"/><circle cx="31.8" cy="13.4" r="2.7" fill="#5b9bff"/><circle cx="28" cy="28" r="6.8" fill="#fff"/></svg>';
+function callbackPage(res, status, title, text) {
+  res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CALLBACK_CSP });
+  res.end(`<!doctype html><html lang="da"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Aura</title><style>${CALLBACK_STYLE}</style><main>${AURA_MARK}<h1>${title}</h1><p>${text}</p></main></html>`);
+}
+
 /** Login foregår i systembrowseren. OAuth-tokenet findes kun i hukommelsen indtil organisationsvalget. */
 class KomplaiLogin {
   constructor({ baseURL = API, issuer = ISSUER, fetcher = (...args) => fetch(...args) } = {}) { this.baseURL = baseURL; this.issuer = issuer; this.fetcher = fetcher; this.pending = null; }
@@ -55,13 +65,12 @@ class KomplaiLogin {
           const expectedHost = `127.0.0.1:${current.server.address()?.port}`;
           if (req.method !== 'GET' || req.headers.host !== expectedHost || req.url.length > 8192) { res.writeHead(400).end(); return; }
           const url = new URL(req.url, `http://${expectedHost}`);
-          if (url.pathname !== '/komplai/callback' || url.searchParams.getAll('state').length !== 1 || !same(url.searchParams.get('state'), state)) { res.writeHead(400).end('Login kunne ikke bekræftes.'); return; }
+          if (url.pathname !== '/komplai/callback' || url.searchParams.getAll('state').length !== 1 || !same(url.searchParams.get('state'), state)) { callbackPage(res, 400, 'Login kunne ikke bekræftes', 'Start login igen fra Aura.'); return; }
           const value = url.searchParams.get('code');
           if (current.received) { res.writeHead(409).end(); return; }
           current.received = true;
-          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-          if (url.searchParams.has('error') || url.searchParams.getAll('code').length !== 1 || !value || value.length > 4096) { res.writeHead(400).end('Login blev ikke gennemført. Gå tilbage til Aura.'); reject(new Error('Login blev ikke gennemført.')); }
-          else { res.end('Gå tilbage til Aura for at fortsætte.'); resolve(value); }
+          if (url.searchParams.has('error') || url.searchParams.getAll('code').length !== 1 || !value || value.length > 4096) { callbackPage(res, 400, 'Login blev ikke gennemført', 'Gå tilbage til Aura, og prøv igen.'); reject(new Error('Login blev ikke gennemført.')); }
+          else { callbackPage(res, 200, 'Du er logget ind', 'Gå tilbage til Aura for at fortsætte. Du kan lukke denne fane.'); resolve(value); }
           current.server.close();
         });
         current.server.on('error', () => reject(new Error('Aura kunne ikke åbne den lokale loginforbindelse.')));

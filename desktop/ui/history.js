@@ -2,7 +2,7 @@
 // version ad gangen med dens filer, og én gennemgang før enhver gendannelse eller fortrydelse. Gennemgangen viser
 // forhåndsvisningen nu og det, den går tilbage til, hvad der sker med hver fil, og hvad der ellers berøres.
 (() => {
-  let status = null, showAll = false, version = null, review = null, label = '', gitReview = null;
+  let status = null, showAll = false, version = null, review = null, label = '', gitReview = null, reviewRequest = 0;
   const visible = 8;
   const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
   // Billederne hentes, når de skal vises, og huskes, mens appen er åben.
@@ -175,16 +175,34 @@
   // ---------- Gennemgang før gendannelse og fortryd ----------
   const outcomeText = file => file.outcome === 'conflict' ? 'I har begge rettet de samme linjer' : file.outcome === 'kept' ? 'Sættes tilbage; dine senere rettelser bevares' : { Ændres: 'Sættes tilbage', Slettes: 'Slettes', Genskabes: 'Genskabes' }[file.action] || file.action;
   async function reviewRestoration(input, options = {}) {
+    const request = ++reviewRequest, owner = options.owner || selectedOwner();
     review = null; label = options.label || '';
     $('#restore-confirm').disabled = true; $('#restore-feedback').textContent = '';
+    $('#restore-dialog').querySelector('.dialog-notice')?.remove();
+    $('#restore-dialog').querySelector('.restore-retry')?.remove();
     for (const id of ['#restore-outcomes', '#restore-files', '#restore-data', '#restore-conflict-lines']) $(id).replaceChildren();
     $('#restore-conflicts').hidden = true; $('#restore-compare').hidden = true; $('#restore-unsaved').hidden = true; $('#restore-images-note').hidden = true;
     for (const fold of $('#restore-dialog').querySelectorAll('details')) fold.open = false;
     $('#restore-summary').textContent = 'Henter filerne og et billede af forhåndsvisningen …';
     $('#restore-title').textContent = options.title || 'Gå tilbage til en tidligere version'; $('#restore-confirm').textContent = options.confirm || 'Gå tilbage til denne version';
     const choice = document.querySelector('input[name="restore-choice"][value="ours"]'); if (choice) choice.checked = true;
-    $('#restore-dialog').showModal();
-    review = await call(input.merge ? 'chatMergeReview' : 'restoreReview', { ...input, view: window.previewViewSize?.() || null });
+    $('#restore-dialog').setAttribute('aria-busy', 'true');
+    if (!$('#restore-dialog').open) $('#restore-dialog').showModal();
+    try {
+      const result = await call(input.merge ? 'chatMergeReview' : 'restoreReview', { ...input, view: window.previewViewSize?.() || null }, owner);
+      if (request !== reviewRequest || !$('#restore-dialog').open) return;
+      review = { ...result, owner, sourceView: viewFor(owner?.chat), taskUndo: options.taskUndo === true, taskID: options.taskID };
+    } catch (error) {
+      if (request !== reviewRequest || !$('#restore-dialog').open) return;
+      $('#restore-summary').textContent = 'Gennemgangen kunne ikke hentes. Ingen filer er ændret.';
+      $('#restore-feedback').textContent = error.message;
+      const retry = node('button', 'Prøv igen', 'restore-retry'); retry.type = 'button';
+      retry.onclick = () => action(() => reviewRestoration(input, options));
+      $('#restore-feedback').before(retry);
+      return;
+    } finally {
+      if (request === reviewRequest) $('#restore-dialog').setAttribute('aria-busy', 'false');
+    }
     review.mergeChat = input.merge ? input.chat : null;
     document.querySelector('input[name="restore-choice"][value="theirs"]').parentElement.lastChild.textContent = input.merge ? ' Brug linjerne fra kopien' : ' Brug linjerne fra før';
     if (review.undo) { $('#restore-title').textContent = options.title || (review.undoMerge ? 'Fortryd sidste indfletning' : 'Fortryd sidste gendannelse'); $('#restore-confirm').textContent = options.confirm || (review.undoMerge ? 'Fortryd indfletningen' : 'Fortryd gendannelsen'); label = review.undoMerge ? 'Fortrudt indfletning' : 'Fortrudt gendannelse'; }
@@ -242,35 +260,41 @@
     $('#restore-confirm').disabled = !files.length && review.kind !== 'merge';
     if (!files.length && review.kind === 'merge') $('#restore-confirm').textContent = 'Afslut kopien';
   }
+  $('#restore-dialog').addEventListener('close', () => { ++reviewRequest; review = null; $('#restore-dialog').setAttribute('aria-busy', 'false'); });
   $('#restore-undo').onclick = () => action(() => reviewRestoration({ undo: true }));
   $('#restore-confirm').onclick = () => action(async () => {
     if (!review) return;
     const ours = document.querySelector('input[name="restore-choice"]:checked')?.value !== 'theirs';
     const choices = Object.fromEntries(review.files.filter(f => f.outcome === 'conflict').map(f => [f.file, ours ? 'ours' : 'theirs']));
-    const token = review.token, git = review.git, mergeChat = review.mergeChat; review = null; $('#restore-confirm').disabled = true;
-    const result = await call(mergeChat ? 'chatMerge' : 'restoreVersion', { token, label, choices, ...(mergeChat ? { chat: mergeChat } : {}) });
-    if (result.project) await displayProject(result.project);
-    else if (result.state) { await showChat(result.state); await refreshRecent(); }
+    const token = review.token, git = review.git, mergeChat = review.mergeChat, owner = review.owner, sourceView = review.sourceView, taskUndo = review.taskUndo, taskID = review.taskID, request = reviewRequest; review = null; $('#restore-confirm').disabled = true;
+    const result = await call(mergeChat ? 'chatMerge' : 'restoreVersion', { token, label, choices, ...(mergeChat ? { chat: mergeChat } : {}) }, owner);
+    const active = () => current?.root === owner?.root && view === sourceView;
+    // Resultatet tilhører den oprindelige samtale, selv hvis brugeren har lukket
+    // dialogen og åbnet et andet projekt, mens filerne blev sat tilbage.
+    if (active() && request === reviewRequest && $('#restore-dialog').open) {
+      if (result.project) await displayProject(result.project);
+      else if (result.state) { await showChat(result.state); await refreshRecent(); }
+    }
+    if (request === reviewRequest) $('#restore-dialog').close();
     if (mergeChat) {
-      $('#restore-dialog').close();
-      const box = viewFor(mergeChat).review; box.replaceChildren(node('h3', result.restored.files ? 'Kopiens ændringer er flettet ind' : 'Kopien er afsluttet'));
+      const box = sourceView.review; box.replaceChildren(node('h3', result.restored.files ? 'Kopiens ændringer er flettet ind' : 'Kopien er afsluttet'));
       box.append(node('p', result.restored.files ? `${count(result.restored.files, 'fil er', 'filer er')} ændret i projektet.${result.saved ? ' Gemt som en ny version.' : ''} Prøv resultatet i forhåndsvisningen.` : 'Projektfilerne er uændrede. Nye opgaver arbejder i projektet.'));
       if (result.restored.files) {
         const buttons = node('div', undefined, 'row'), changes = node('button', 'Se ændringerne'), undo = node('button', 'Fortryd indfletningen');
         changes.type = undo.type = 'button'; changes.onclick = () => action(() => window.workspace.showChange(result.task));
-        undo.onclick = () => action(() => reviewRestoration({ undo: true, expected: result.restored.id }, { title: 'Fortryd indfletningen?', confirm: 'Fortryd indfletningen' }));
+        undo.onclick = () => action(() => reviewRestoration({ undo: true, expected: result.restored.id }, { owner, title: 'Fortryd indfletningen?', confirm: 'Fortryd indfletningen' }));
         buttons.append(changes, undo); box.append(buttons);
       }
       if (result.error) box.append(node('p', result.error)); box.hidden = false;
-      message(result.error || 'Kopien er afsluttet. Du arbejder nu i projektet.'); return;
+      if (active()) message(result.error || 'Kopien er afsluttet. Du arbejder nu i projektet.'); return;
     }
-    $('#restore-dialog').close();
     const changed = result.restored?.files || 0, files = `${count(changed, 'fil er', 'filer er')} sat tilbage`;
+    if (changed && taskUndo && taskID) { sourceView.undoneTasks ||= new Set(); sourceView.undoneTasks.add(taskID); }
     const first = result.savedFirst ? ' Dine ugemte ændringer blev gemt som en version først.' : '';
     const text = result.error || (!changed ? 'Ingen filer blev ændret, fordi du beholdt dine linjer.' : result.saved ? `${files} og gemt som en ny version. Du kan gå frem igen under Ændringer › Versioner.${first}` : git ? `${files}. Gennemse forhåndsvisningen. Ændringerne er ikke gemt som en ny version.${first}` : `${files}. Gennemse forhåndsvisningen. Du kan fortryde det under Ændringer › Versioner.`);
-    $('#git-feedback').textContent = text;
-    const box = view.review; box.replaceChildren(node('h3', result.error ? 'Gendannelsen kræver din opmærksomhed' : changed ? 'Filerne er sat tilbage' : 'Dine linjer er bevaret'), node('p', text)); box.hidden = false;
-    box.tabIndex = -1; box.focus();
+    if (active()) $('#git-feedback').textContent = text;
+    const box = sourceView.review; box.replaceChildren(node('h3', result.error ? 'Gendannelsen kræver din opmærksomhed' : changed ? taskUndo ? 'Opgaven er fortrudt' : 'Filerne er sat tilbage' : 'Dine linjer er bevaret'), node('p', text)); box.hidden = false;
+    box.tabIndex = -1; if (active()) box.focus();
   });
 
   // Nye billeder fra baggrunden: listen eller den åbne version opdateres, hvis de vises.

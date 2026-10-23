@@ -21,42 +21,29 @@ const { execFileSync } = require('node:child_process');
  let app,page;
  try {
   app = await electron.launch({executablePath,args:['--user-data-dir='+path.join(root,'appdata')],env});
+  await require('./ui-test-helpers.cjs').forbidGitWrites(app);
   page=await app.firstWindow(); const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await require('./ui-test-helpers.cjs').skipIntroduction(page);
   await require('./ui-test-helpers.cjs').isolateDocuments(app,path.join(root,'Dokumenter'));
-  await page.fill('#name','Installationsprøve'); await page.fill('#purpose','En syntetisk side fra installationspakken');
-  await require('./ui-test-helpers.cjs').chooseLocation(app,page,root); await page.click('#create');
-  await page.waitForSelector('#workspace:not([hidden])');
-  await require('./ui-test-helpers.cjs').firstVersion(page,path.join(root,'projekt-installationsproeve'),'Installationsprøve');
+  // Brug den pakkede projektfunktion direkte til testmaterialet. UI-knappen Opret
+  // gemmer også en Git-version; denne installationsprøve ændrer ingen Git-historik.
+  const project = await app.evaluate(async ({app}, {root,resources}) => {
+   const require=process.getBuiltinModule('module').createRequire(app.getAppPath()+'/package.json');
+   return (await require('./core/projects.cjs').createProject(root,{name:'Installationsprøve',purpose:'En syntetisk side fra installationspakken',color:null,links:[],tests:'manuel'},[],resources+'/profiles')).root;
+  }, {root,resources});
+  await require('./ui-test-helpers.cjs').openExistingProject(app,page,project);
+  await require('./ui-test-helpers.cjs').firstVersion(page,project,'Installationsprøve');
   assert.equal(await app.evaluate(({app})=>app.isPackaged),true);
-  // Nye projekter har versioner fra start: den medfølgende Git har gemt startfilerne som første version.
-  const project=path.join(root,'projekt-installationsproeve');
-  assert.equal(execFileSync(runtime.git,['-C',project,'log','--format=%s'],{env,encoding:'utf8'}).trim(),'Projekt oprettet');
-  // firstVersion har rettet startfilen for at udløse et rigtigt preview. Den rettelse skal vises som ugemt.
-  await require('./ui-test-helpers.cjs').menuClick(page, '#git-button');await page.locator('#git-summary').filter({hasText:'1 ændring er ikke gemt endnu.'}).waitFor();
-  await page.locator('#git-refresh').evaluate(el=>{el.closest('details').open=true;});
-  await fs.mkdir(path.join(root,'hooks'));
-  execFileSync(runtime.git,['-C',project,'config','--local','core.hooksPath',path.join(root,'hooks')],{env});
-  execFileSync(runtime.git,['-C',project,'config','--local','commit.gpgsign','false'],{env});
-  for(const key of ['user.name','user.email']) execFileSync(runtime.git,['-C',project,'config','--local',key,''],{env});
-  await page.click('#git-refresh');await page.waitForSelector('#git-identity:not([hidden])');
-  // Genindlæs også, mens identitetsformularen allerede er synlig. Et gammelt svar må ikke overskrive indtastningen.
-  await page.waitForFunction(()=>!document.querySelector('#git-refresh').disabled);
-  assert.equal(await page.evaluate(()=>{document.querySelector('#git-refresh').click();return document.querySelector('#git-identity').hidden;}),true);
-  await page.waitForFunction(()=>!document.querySelector('#git-refresh').disabled&&!document.querySelector('#git-identity').hidden);
-  await page.fill('#git-name','Installationsprøve');await page.fill('#git-email','test@example.invalid');await page.click('#git-identity button');
-  await page.waitForFunction(()=>document.querySelector('#git-identity').hidden&&!document.querySelector('#git-refresh').disabled);
-  // Forlæng kun prøvens læsning, så Gem version faktisk forsøges, mens gennemgangen stadig hentes.
-  await app.evaluate(({ipcMain})=>{const read=ipcMain._invokeHandlers.get('git:review');if(!read)throw Error('Prøven fandt ikke filgennemgangens IPC-handler');ipcMain._invokeHandlers.set('git:review',async(...args)=>{const result=await read(...args);await new Promise(resolve=>setTimeout(resolve,1000));return result;});});
-  await fs.writeFile(path.join(project,'public','noter.txt'),'Afprøvning af installationspakken');await page.click('#git-refresh');
-  await page.locator('#git-summary').filter({hasText:'2 ændringer er ikke gemt endnu.'}).waitFor();
-  assert.equal(await page.isEnabled('#git-save-all'),false,'Gem version venter på den igangværende filgennemgang');
-  await page.fill('#git-note','Afprøv installationspakken');await page.click('#git-save-all');await page.locator('#git-feedback').filter({hasText:'er gemt lokalt'}).waitFor();
-  assert.match(execFileSync(runtime.git,['-C',project,'log','-1','--format=%an <%ae>'],{env,encoding:'utf8'}),/Installationsprøve <test@example.invalid>/);
-  await page.locator('#git-summary').filter({hasText:'Alt er gemt.'}).waitFor();
+  await assert.rejects(fs.access(path.join(project,'.git')),{code:'ENOENT'});
+  assert.equal(await fs.readFile(path.join(project,'AGENTS.md'),'utf8'),await fs.readFile(path.join(resources,'profiles/grundregler.md'),'utf8'));
+  assert.throws(()=>execFileSync(runtime.git,['-C',project,'rev-parse','--is-inside-work-tree'],{env,encoding:'utf8',stdio:'pipe'}),/not a git repository|ikke.*git/i);
+  await require('./ui-test-helpers.cjs').menuClick(page, '#git-button');
+  await page.locator('#git-init').waitFor({state:'visible'});
+  assert.equal(await page.isEnabled('#git-init'),true);
   await page.click('#tab-preview');await page.screenshot({path:path.join(root,'installeret.png')});
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({status:'bestået',root,checks:['pakket app','isoleret brugerdata','begrænset PATH','medfølgende OpenCode/Git/Node/npm','projektoprettelse med profiler','rigtigt preview','Git fra start med første version','Git-identitet og Gem version med ét klik kun i syntetisk testprojekt'],limitation:'Ikke en separat ren computer; ingen ekstern AI eller Windows-kørsel på Mac.'}));
+  await require('./ui-test-helpers.cjs').assertNoGitWrites(app);
+  console.log(JSON.stringify({status:'bestået',root,checks:['pakket app','isoleret brugerdata','begrænset PATH','medfølgende OpenCode/Git/Node/npm','faktiske filer fra pakkens projektfunktion og profiler','rigtigt preview','eksisterende mappe uden Git åbnes uden ændring af historik'],limitation:'Ingen Git-skrivninger eller testcommits. Projektoprettelsens automatiske version og Gem version er ikke afprøvet. Ikke en separat ren computer; ingen ekstern AI eller Windows-kørsel på Mac.'}));
  } catch(error) {
   await page?.screenshot({path:path.join(root,'fejl.png'),timeout:3000}).catch(()=>{});
   const status=await page?.evaluate(()=>({git:document.querySelector('#git-summary')?.textContent,feedback:document.querySelector('#git-feedback')?.textContent,identity:!document.querySelector('#git-identity')?.hidden,files:document.querySelectorAll('#git-files input').length})).catch(()=>null);

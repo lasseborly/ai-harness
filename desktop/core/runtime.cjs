@@ -12,7 +12,8 @@ function configure(resources, platform = process.platform, arch = process.arch) 
     opencode: path.join(root, 'opencode', win ? 'bin/opencode.exe' : 'bin/opencode'),
     node: path.join(root, 'node', win ? 'node.exe' : 'bin/node'),
     gitExec: path.join(gitRoot, win ? `${gitSub}/libexec/git-core` : 'libexec/git-core'),
-    gitTemplates: path.join(gitRoot, win ? `${gitSub}/share/git-core/templates` : 'share/git-core/templates')
+    gitTemplates: path.join(gitRoot, win ? `${gitSub}/share/git-core/templates` : 'share/git-core/templates'),
+    gitCa: platform === 'linux' ? path.join(gitRoot, 'ssl/cacert.pem') : null
   };
   for (const key of ['git','node','opencode']) if (!fs.existsSync(paths[key])) throw new Error('Installationen mangler ' + key + '. Hent installationspakken igen.');
   const bins = [path.dirname(paths.node), path.dirname(paths.git), path.dirname(paths.opencode)];
@@ -25,6 +26,9 @@ function configure(resources, platform = process.platform, arch = process.arch) 
   return bundled;
 }
 function gitEnvironment(env) {
-  return bundled ? { ...env, GIT_EXEC_PATH: bundled.gitExec, GIT_TEMPLATE_DIR: bundled.gitTemplates } : env;
+  if (!bundled) return env;
+  const git = { GIT_EXEC_PATH: bundled.gitExec, GIT_TEMPLATE_DIR: bundled.gitTemplates };
+  if (bundled.gitCa) git.GIT_SSL_CAINFO = bundled.gitCa;
+  return { ...env, ...git };
 }
 module.exports = { configure, gitEnvironment, get: () => bundled };

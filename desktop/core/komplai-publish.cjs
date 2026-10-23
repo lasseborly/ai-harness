@@ -1,11 +1,12 @@
 const zlib = require('node:zlib');
-const { json } = require('./komplai.cjs');
+const { json, readBounded } = require('./komplai.cjs');
 
 // komplai Run: organisationens apps på {app}.komplai.run.
 // Aura uploader en gemt Git-version med den udgivelsesadgang, der blev givet ved login.
 const HUB = 'https://hub.komplai.dk';
 const SUFFIX = '.komplai.run';
 const LABEL = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
+const APP_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const RESERVED = new Set(['acme', 'admin', 'api', 'app', 'apps', 'auth', 'cdn', 'control', 'dns', 'docs', 'help', 'hub', 'komplai', 'login', 'logout', 'mail', 'ns1', 'ns2', 'publish', 'root', 'security', 'smtp', 'status', 'support', 'system', 'www']);
 // Samme filtyper som komplais appmiljø modtager.
 const EXTENSIONS = new Set(['html', 'htm', 'css', 'js', 'mjs', 'json', 'txt', 'csv', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg', 'ico', 'woff', 'woff2', 'ttf', 'otf', 'pdf', 'mp3', 'mp4', 'webm', 'ogg', 'wav', 'wasm']);
@@ -24,6 +25,11 @@ const messages = {
   metadata_capacity: 'Organisationen har nået grænsen for antal apps. Slet en app i komplai, eller udgiv til en eksisterende.',
   publication_uncertain: 'komplai bekræftede ikke udgivelsen. Kontrollér appen i komplai, før du prøver igen.',
   visibility_changed: 'Appens adgang er ændret. Gennemgå udgivelsen igen. Adgang til en eksisterende app ændres i komplai.',
+  public_confirmation: 'Skriv appens navn præcis for at bekræfte, at appen bliver offentlig.',
+  public_on_create: 'komplai opretter nye apps for organisationen. Gør appen offentlig i Run.',
+  public_app: 'Appen bruger komplai-funktioner, der kun virker for organisationen. Vælg Organisationen, eller fjern brugen fra appens komplai.json.',
+  public_app_capabilities: 'Appen bruger komplai-funktioner, der kun virker for organisationen. Vælg Organisationen, eller fjern brugen fra appens komplai.json.',
+  invalid_manifest: 'Appens komplai.json kan ikke bruges. Ret manifestet, og prøv igen.',
 };
 
 function suggestLabel(name) {
@@ -75,9 +81,9 @@ class KomplaiDeployment {
   async call(route, options = {}) {
     const { key } = await this.account();
     try { return await json(this.hub + route, { ...options, key, fetcher: this.fetcher }); }
-    catch (error) { throw Error(messages[error.code] || error.message); }
+    catch (error) { const e = Error(messages[error.code] || error.message); e.code = error.code; e.status = error.status; throw e; }
   }
-  /** Organisationens adresse og dine apps. Bruges også af Del-dialogen. */
+  /** Organisationens adresse og dine apps. Bruges også af Udgiv-dialogen. */
   async overview() {
     const account = await this.account(), d = await this.call('/api/publish/native');
     if (!d || d.address !== account.address || !Array.isArray(d.apps)) throw Error('komplais svar matcher ikke din udgivelsesadgang. Log ind igen.');
@@ -114,8 +120,11 @@ class KomplaiDeployment {
     if (body.length > 10 * 1024 * 1024) throw Error(messages.upload_limit);
     let appId = target.id;
     if (!appId) {
-      const created = await this.call('/api/publish/native/apps', { body: { name: config.name, visibility: config.visibility, ...(config.slug !== undefined ? { slug: config.slug } : {}) } });
+      // komplai opretter altid en ny app for organisationen. At gøre den offentlig er sit eget trin,
+      // bekræftet med appens navn, og det sker her før første version.
+      const created = await this.call('/api/publish/native/apps', { body: { name: config.name, visibility: 'private', ...(config.slug !== undefined ? { slug: config.slug } : {}) } });
       appId = created.id; await onCreated(appId);
+      if (config.visibility === 'public') await this.call(`/api/publish/native/apps/${appId}`, { method: 'PATCH', body: { visibility: 'public', confirmPublic: config.confirmPublic } });
     }
     const app = await this.upload(appId, body, single ? 'text/html' : 'application/zip');
     if (!app.activeRelease) throw Error(messages.publication_uncertain);
@@ -134,6 +143,37 @@ class KomplaiDeployment {
     let data = {}; try { data = await response.json(); } catch {}
     if (!response.ok) throw Error(messages[data.error] || messages.publication_uncertain);
     return data;
+  }
+  /** En ny app til forhåndsvisningen. Den er kun for organisationen og udgives først med Udgiv. */
+  async createApp(name) {
+    const created = await this.call('/api/publish/native/apps', { body: { name, visibility: 'private' } });
+    if (typeof created?.id !== 'string' || !APP_ID.test(created.id)) throw Error(messages.publication_uncertain);
+    return { id: created.id, name: typeof created.name === 'string' && created.name.trim() ? created.name.slice(0, 200) : name };
+  }
+  /** Hubs forhåndsvisning af din egen app: rigtig identitet og AI, data adskilt fra appens rigtige data. */
+  async preview(appId, manifest) {
+    if (!APP_ID.test(appId)) throw Error(messages.not_found);
+    const d = await this.call(`/api/publish/native/apps/${appId}/preview`, { body: { manifest } });
+    if (typeof d?.session !== 'string' || !d.session || d.session.length > 8192 || !Number.isFinite(Date.parse(d.expiresAt)) || !d.app || typeof d.app !== 'object') throw Error('komplai startede ikke forhåndsvisningen. Prøv igen.');
+    return d;
+  }
+  /** Ét SDK-kald i forhåndsvisningen. Status og svar går uændret tilbage til appen. */
+  async previewCall(appId, request) {
+    if (!APP_ID.test(appId)) return { status: 404, body: { error: 'not_found' } };
+    const { key } = await this.account();
+    let response;
+    try { response = await this.fetcher(`${this.hub}/api/publish/native/apps/${appId}/preview/call`, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(130000), headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(request) }); }
+    catch { return { status: 503, body: { error: 'unavailable' } }; }
+    let body = null; try { body = JSON.parse(await readBounded(response, 2_000_000)); } catch {}
+    return { status: response.status, body: body && typeof body === 'object' ? body : { error: 'unavailable' } };
+  }
+  /** komplais officielle app-SDK, den samme som hver Run-app får fra sin egen adresse. */
+  async sdkScript() {
+    let response;
+    try { response = await this.fetcher(`${this.hub}/api/publish/native/sdk/v1.js`, { redirect: 'error', signal: AbortSignal.timeout(15000), headers: { Accept: 'text/javascript' } }); }
+    catch { throw Error('komplais app-SDK kunne ikke hentes.'); }
+    if (!response.ok || !/javascript/.test(response.headers.get('content-type') || '')) { await response.body?.cancel(); throw Error('komplais app-SDK kunne ikke hentes.'); }
+    return readBounded(response, 512 * 1024);
   }
   async status(config, receipt) {
     const d = await this.overview(), app = d.apps.find(a => a.id === (receipt.appId || config.appId));

@@ -22,6 +22,18 @@ test('Azure accepterer ikke en gammel testudgivelse som resultatet af ny upload'
  const c={project:'test',subscription:'sub',group:'group'},receipt={startedAt:'2026-09-24T10:00:00Z'};
  assert.equal((await provider.status(c,receipt)).state,'AWAITING_UPDATE');lastUpdatedOn='2026-09-24T10:01:00Z';assert.equal((await provider.status(c,receipt)).state,'READY');
 });
+test('Azure finder SWAs faktiske miljønavn efter fjernet bindestreg og bruger testadressen',async()=>{
+ const observed=[
+  {buildId:'default',name:'default',status:'WaitingForDeployment',hostname:'yellow-bush-08813f903.4.azurestaticapps.net',lastUpdatedOn:'2026-10-23T00:02:19.408277+00:00'},
+  {buildId:'harnesstest',name:'harnesstest',status:'Ready',hostname:'yellow-bush-08813f903-harnesstest.westeurope.4.azurestaticapps.net',lastUpdatedOn:'2026-10-23T00:12:45.915833+00:00'},
+ ];
+ const provider=new AzureDeployment(async()=>JSON.stringify(observed));
+ const c={project:'test',subscription:'sub',group:'group'},receipt={startedAt:'2026-10-23T00:12:00Z'};
+ assert.deepEqual(await provider.status(c,receipt),{state:'READY',url:'https://yellow-bush-08813f903-harnesstest.westeurope.4.azurestaticapps.net'});
+ assert.equal((await provider.status(c,{startedAt:'2026-10-23T00:13:00Z'})).state,'AWAITING_UPDATE');
+ observed[1].buildId='other'; observed[1].name='other';
+ assert.equal((await provider.status(c,receipt)).state,'AWAITING_UPDATE','Et andet miljø må ikke blive kvittering for vores upload');
+});
 
 test('hver kontrol erstatter gammel evidens; fejl og adgang lover ikke en fungerende app', async () => {
  const f=fixture(),r=await f.deployments.review('/test',config);await f.deployments.deploy('/test',r.token);
@@ -43,4 +55,11 @@ test('versionens navn følger godkendelsen og ændrer ikke uploadens indhold', a
  const f=fixture();f.state.versionNames={[artifact.head]:'Klar til tester'};
  const r=await f.deployments.review('/test',config);assert.equal(r.version.name,'Klar til tester');f.state.versionNames[artifact.head]='Et nyt lokalt navn';
  const receipt=await f.deployments.deploy('/test',r.token);assert.equal(receipt.version.name,'Klar til tester');assert.equal(receipt.head,artifact.head);assert.equal(receipt.hash,artifact.hash);
+});
+
+test('udgivelse uden en gemt version siger, hvad der mangler', async t => {
+  const { deploymentArtifact } = require('../core/deployment-artifact.cjs');
+  const root = await require('node:fs/promises').mkdtemp(require('node:path').join(require('node:os').tmpdir(), 'aura-uden-version-'));
+  t.after(() => require('node:fs/promises').rm(root, { recursive: true, force: true }));
+  await assert.rejects(deploymentArtifact(root, 'public'), /Gem en version af appen, før du udgiver/);
 });

@@ -1,4 +1,4 @@
-// Del → PKCE → IPC → gennemgang → rigtig adapter → lokal HTTP → Run-arkivlæser.
+// Udgiv → PKCE → IPC → gennemgang → rigtig adapter → lokal HTTP → Run-arkivlæser.
 // Ingen eksterne kald, nøglering, modelkald eller Git-skrivninger.
 // ZIP-materialet kopieres fra et eksisterende commit. Artifact-grænsen er injiceret,
 // fordi prøven ikke opretter commits; Git-udtrækket afprøves særskilt.
@@ -32,6 +32,7 @@ const digest = data => createHash('sha256').update(data).digest('hex');
   await fs.writeFile(path.join(project, 'fixture-version.json'), JSON.stringify({ head, version: { name, at }, source: 'site/dist i eksisterende commit' }));
   const grant = 'komp_publish_grant_' + 'a'.repeat(64);
   const existingId = '11111111-2222-4333-8444-555555555555';
+  const creations = [], changes = [];
   const apps = new Map([[existingId, { id: existingId, name: 'Eksisterende prøve', slug: 'eksisterende-proeve', visibility: 'private', activeRelease: 'tidligere-version', releases: [{ id: 'tidligere-version' }] }]]);
   const live = new Map([[existingId, new Map([['index.html', Buffer.from('<h1>Tidligere privat version</h1>')]])]]);
   const calls = [], uploads = [], screens = [], serverErrors = [];
@@ -69,11 +70,19 @@ const digest = data => createHash('sha256').update(data).digest('hex');
       if (url.pathname === '/hub/api/publish/native/address') return send({ available: ![...apps.values()].some(a => a.slug === url.searchParams.get('slug')), reason: null });
       if (url.pathname === '/hub/api/publish/native/apps') {
         assert.equal(method, 'POST'); const input = JSON.parse(body), id = randomUUID();
+        // Som Hub: en ny app er altid for organisationen; offentlig er et særskilt, bekræftet trin.
+        if (input.visibility === 'public') return send({ error: 'public_on_create' }, 403);
+        creations.push(input);
         const item = { id, name: input.name, slug: input.slug || 'tilfaeldig-proeve', visibility: input.visibility, activeRelease: null, releases: [] }; apps.set(id, item); return send(metadata(item));
       }
       const change = url.pathname.match(/^\/hub\/api\/publish\/native\/apps\/([^/]+)$/);
       if (change) {
-        throw Error('Aura må ikke ændre en eksisterende apps adgang under upload.');
+        // Aura gør kun en ny app offentlig før dens første version, med appens navn som bekræftelse.
+        const item = apps.get(change[1]), input = JSON.parse(body);
+        if (method !== 'PATCH' || !item || item.activeRelease || item.releases.length) throw Error('Aura må ikke ændre en eksisterende apps adgang under upload.');
+        assert.deepEqual(Object.keys(input).sort(), ['confirmPublic', 'visibility']);
+        if (input.visibility !== 'public' || input.confirmPublic !== item.name) return send({ error: 'public_confirmation' }, 403);
+        changes.push({ id: item.id, ...input }); item.visibility = 'public'; return send(metadata(item));
       }
       const upload = url.pathname.match(/^\/hub\/api\/publish\/([^/]+)\/releases$/);
       if (upload) {
@@ -240,7 +249,11 @@ const digest = data => createHash('sha256').update(data).digest('hex');
     // En ny offentlig app kræver fortsat et eksplicit valg; ingen adgang er forvalgt.
     await next(); assert.equal(await page.inputValue('#deploy-komplai-app'), existingId, 'Seneste app bevares, selv om den er omdøbt siden søgningen.'); await page.click('#deployment-file-options'); await page.click('#deployment-change-destination'); await page.click('#deployment-change-app'); await idle(); await capture('skift-app'); assert.equal(calls.filter(call => call.route === '/api/v1/aura/publishing/connect').length, 1); await page.click('#deploy-komplai-create'); assert.equal(await page.locator('[name="komplai-visibility"]:checked').count(), 0);
     await page.fill('#deploy-komplai-name', 'Offentlig prøve'); await page.click('#deploy-komplai-edit-address'); await page.fill('#deploy-komplai-slug', 'offentlig-proeve'); await page.click('#deployment-next'); await page.click('#deployment-next');
-    await page.check('[name="komplai-visibility"][value="public"]'); await review(); await send(); assert.equal(apps.size, 3); assert.equal(uploads.at(-1).visibility, 'public');
+    await page.check('[name="komplai-visibility"][value="public"]'); await page.waitForSelector('[data-deploy-step="confirmPublic"]:not([hidden])'); assert.equal(await page.textContent('#deployment-heading'), 'Skal appen være offentlig?'); await capture('bekraeft-offentlig');
+    await page.fill('#deploy-komplai-confirm', 'offentlig prøve'); await page.click('#deployment-next'); assert.equal(await page.locator('[data-deploy-step="confirmPublic"]').isVisible(), true, 'Et forkert navn bekræfter ikke den offentlige app.');
+    await page.fill('#deploy-komplai-confirm', 'Offentlig prøve'); await page.click('#deployment-next'); await review(); await send(); assert.equal(apps.size, 3); assert.equal(uploads.at(-1).visibility, 'public');
+    assert.deepEqual(creations.at(-1), { name: 'Offentlig prøve', visibility: 'private', slug: 'offentlig-proeve' });
+    assert.deepEqual(changes.at(-1), { id: uploads.at(-1).appId, visibility: 'public', confirmPublic: 'Offentlig prøve' });
     // Afvist upload bevarer den tidligere version og dens adgang.
     await next(createdId); await review();
     const previous = apps.get(createdId).activeRelease; outcome = 'afvist'; await send();
@@ -272,7 +285,8 @@ const digest = data => createHash('sha256').update(data).digest('hex');
     assert.equal(JSON.stringify(await state()).includes(grant), false); assert.doesNotMatch(await fs.readFile(path.join(appdata, 'harness/settings.json'), 'utf8'), /komp_publish_grant_|syntetisk-login/);
     assert.deepEqual(errors, []); assert.deepEqual(serverErrors, []); assert(screens.every(screen => !screen.overflow)); assert(screens.every(screen => screen.details || (screen.providers ? screen.choices === 6 : screen.choices <= 4)), 'Højst fire synlige kontroller; udbydertrinnet har tre valg, sidemenu samt Tilbage og Luk: ' + JSON.stringify(screens));
     assert.equal(calls.some(call => /chat\/completions|\/aura\/connect$|\/models/.test(call.route)), false);
-    assert.equal(calls.some(call => call.method === 'PATCH'), false);
+    // Den eneste ændring af adgang er den bekræftede offentliggørelse af den nye app før dens første version.
+    assert.equal(changes.length, 1); assert.equal(calls.filter(call => call.method === 'PATCH').length, changes.length);
     await fs.writeFile(path.join(root, 'kvittering.json'), JSON.stringify(receipt, null, 2));
     await fs.writeFile(path.join(root, 'skaermmaaling.json'), JSON.stringify(screens, null, 2));
     console.log(JSON.stringify({ status: 'bestået', root, sourceCommit: head, uploads: uploads.map(({ files, ...upload }) => ({ ...upload, files: [...files.keys()] })), screens, limitations: ['lokal syntetisk OAuth/Hub, ingen reel udgivelse', 'nøglering simuleret', 'artifact-provider injiceret; Git-udtræk afprøves særskilt', 'enkelt-HTML har syntetisk versionsmetadata', 'ingen Windows-prøve'] }));

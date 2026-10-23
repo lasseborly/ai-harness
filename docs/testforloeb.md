@@ -111,7 +111,7 @@ Den automatiske Windows-prøve starter den pakkede `.exe` direkte. Følgende ska
 Fra 0.4.0-beta.1 prøves desuden følgende på Windows, fordi det er nyt eller kun afprøvet på Mac:
 
 6. Opdatér fra 0.3.0-beta.1 gennem appen i stedet for manuelt. Åbn Indstillinger, søg efter opdateringen, og vælg download og genstart som to særskilte valg. Kontroller, at en igangværende opgave udskyder genstarten, og at kladde og projektfiler er bevarede bagefter. Windows bruger installationsprogrammet til selve installationen.
-7. Gennemgå Del fra start til slut: vælg destination, log ind, vælg app og adresse, vælg hvem der kan åbne appen, og udgiv. Kontroller, at hver skærm stiller ét spørgsmål, at Tilbage virker, og at kvitteringen viser udgivelse, adgang og kontrol hver for sig. Brug en syntetisk app, og slet den bagefter.
+7. Gennemgå Udgiv fra start til slut: vælg destination, log ind, vælg app og adresse, vælg hvem der kan åbne appen, og udgiv. Kontroller, at hver skærm stiller ét spørgsmål, at Tilbage virker, og at kvitteringen viser udgivelse, adgang og kontrol hver for sig. Brug en syntetisk app, og slet den bagefter.
 8. Installer skills i et projekt, og kontroller, at de fire integrationer, herunder Promte og komplai Run, kan vælges til og fra. Kontroller, at projektets eget `AGENTS.md` bevares med afsnit og import, og at en sti med mellemrum og danske bogstaver virker.
 
 Dette er en manuel prøvevejledning, ikke et registreret testresultat. Resultater og konkrete begrænsninger føres i [teststatus](teststatus.md). Indholdet af Windows-filen er kontrolleret på Mac; det erstatter ikke prøverne ovenfor.

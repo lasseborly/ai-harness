@@ -21,8 +21,10 @@ async function until(check, description) { for (let i=0;i<300;i++) { if (await c
   if(mode==='wait') return;
   const isToolRun=Boolean(body.tools?.length);
   const hasResult=body.messages.some(m=>m.role==='tool');
+  // En plan tæller kun med alle fire afsnit; ellers bliver svaret i samtalen uden plan.
+  const planning=JSON.stringify(body.messages).includes('PLANLÆGNING:');
   const tool=isToolRun&&!hasResult?{id:'call_test',type:'function',function:{name:'write',arguments:JSON.stringify({filePath:path.join(project,'public/index.html'),content:'<h1>Bygget gennem agenten</h1>'})}}:null;
-  const content=tool?'Arbejdsnote før værktøjskald.':isToolRun?'Ændringen er behandlet.':'Prøveprojekt';
+  const content=tool?'Arbejdsnote før værktøjskald.':isToolRun&&planning?'## Det bygger vi\nEn startside med en tydelig overskrift.\n## Sådan skal det se ud\nRolig og enkel.\n## Teknik og data\nHTML i public/index.html.\n## Det skal du prøve\nSe overskriften i forhåndsvisningen.':isToolRun?'Ændringen er behandlet.':'Prøveprojekt';
   if(body.stream){
    res.setHeader('content-type','text/event-stream');
    const chunk={id:'test',object:'chat.completion.chunk',created:1,model:body.model,choices:[{index:0,delta:tool?{role:'assistant',content,tool_calls:[{index:0,...tool}]}:{role:'assistant',content},finish_reason:null}]};
@@ -71,10 +73,11 @@ async function until(check, description) { for (let i=0;i<300;i++) { if (await c
   assert.ok(requests.some(r=>JSON.stringify(r).includes('FÆLLES-GRUNDLAG-02') && JSON.stringify(r).includes('APPENS REGLER')), 'grundregler og appens regler når modellen');
   assert.ok(requests.some(r=>JSON.stringify(r).includes('<name>harness-git-og-samarbejde</name>')), 'bibliotekets skills vises for modellen');
   preview=await startPreview(project);assert.match(await(await fetch(preview.url)).text(),/Bygget gennem agenten/);
+  // Uden tilstand er det Samtale, der ikke må skrive. Direkte arbejde vælges eksplicit.
   await bench.close();permission='reject';await fs.writeFile(path.join(project,'public/index.html'),'<h1>Bevar</h1>');
-  const declined=await bench.prepare(selection);await bench.send({text:'Prøv igen.',fingerprint:declined.fingerprint});await until(()=>!bench.running,'afvist handling');assert.equal(bench.chat.plan,null,'Direkte arbejde ugyldiggør tidligere plan');
+  const declined=await bench.prepare({...selection,mode:'free'});await bench.send({text:'Prøv igen.',fingerprint:declined.fingerprint});await until(()=>!bench.running,'afvist handling');assert.equal(bench.chat.plan,null,'Direkte arbejde ugyldiggør tidligere plan');
   assert.equal(await fs.readFile(path.join(project,'public/index.html'),'utf8'),'<h1>Bevar</h1>');
-  await bench.close();mode='wait';const canceled=await bench.prepare(selection);await bench.send({text:'Vent på svar.',fingerprint:canceled.fingerprint});await pause(1000);await bench.stop();assert.equal(bench.running,false);
+  await bench.close();mode='wait';const canceled=await bench.prepare({...selection,mode:'free'});await bench.send({text:'Vent på svar.',fingerprint:canceled.fingerprint});await pause(1000);await bench.stop();assert.equal(bench.running,false);
   console.log(JSON.stringify({status:'bestået',root,checks:['planlægning afviser fremprovokeret skriveforsøg','plan og afklaring følger til bygning','forældet plan afvises','afslutning viser faktiske filændringer','rigtig OpenCode-motor','kontrolleret modelserver','krævet datagennemgang','værktøjskald og godkendelse','rigtig filændring','preview fra disk','afvist ændring bevaret','stop'],model:'Simuleret kompatibel API, ikke en ekstern AI-model'}));
  }catch(error){console.error(error);console.error(JSON.stringify(events.filter(e=>/error|permission/.test(e.type))));process.exitCode=1;}
  finally {await bench.close();await preview?.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}

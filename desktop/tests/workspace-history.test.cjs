@@ -125,6 +125,16 @@ test('omdøbning holder, og sletning flytter samtalefilen og vælger den nyeste'
   await assert.rejects(history.removeChat(root,b),/findes ikke/);
   await assert.rejects(history.readChat(root,b),/findes ikke/);
 });
+test('alle åbnede projekter står på listen, nyeste først, også ud over de 12, sidepanelet viser først', async t => {
+  const {history}=await setup(t);
+  for (let i=1;i<=14;i++) await history.store.saveProject(`/projekt-${i}`,{recent:{root:`/projekt-${i}`,name:`Projekt ${i}`,at:new Date(Date.UTC(2026,9,1,i)).toISOString()}});
+  await history.store.saveProject('/kun-indstillinger',{deploy:{}});
+  const recent=await history.recent();
+  assert.equal(recent.length,14,'et projekt uden recent er aldrig åbnet og står ikke på listen');
+  assert.deepEqual(recent.slice(0,2).map(p=>p.name),['Projekt 14','Projekt 13']); assert.equal(recent.at(-1).root,'/projekt-1');
+  await history.open({root:'/projekt-1',name:'Projekt 1'});
+  assert.equal((await history.recent())[0].root,'/projekt-1','det ældste projekt kan åbnes igen og står derefter først');
+});
 test('samtalens navn er første sætning af første besked, højst 60 tegn ved et ordskifte', () => {
   assert.equal(titleFrom([{role:'assistant',text:'Hej'},{role:'user',text:'Byg en side. Den skal være blå.'}]),'Byg en side');
   assert.equal(titleFrom([{role:'user',text:'Hvad koster det?\n\nMere tekst'}]),'Hvad koster det');

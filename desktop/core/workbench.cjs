@@ -13,30 +13,33 @@ const { ChatSession, planningReply } = require('./chat-session.cjs');
 const { Activity } = require('./activity.cjs');
 const { Copies } = require('./copies.cjs');
 const { capture } = require('./changes.cjs');
+const { ApprovalsPolicy } = require('./approvals-policy.cjs');
 
 // Det, der hører til hele projektet: forbindelser, funktioner, skills, briefen, versioner og forhåndsvisningens valg,
 // og projektets samtaler. Hver samtale er en ChatSession med sin egen motor og opgave. Kun én samtale ad gangen kan
 // arbejde i den samme mappe; den, der arbejder, har "krav" på mappen, indtil opgaven er færdig.
 class Workbench {
-  constructor({ directory, safeStorage, profiles, emit, surface = 'desktop', engineFactory = options => new OpenCodeEngine(options) }) {
+  constructor({ directory, safeStorage, profiles, emit, store, history, library: sharedLibrary, registry, surface = 'desktop', engineFactory = options => new OpenCodeEngine(options) }) {
     if (!['desktop', 'cli'].includes(surface)) throw new Error('Ukendt Aura-brugerflade.');
     this.surface = surface;
-    this.store = new Store(directory, safeStorage); this.history = new WorkspaceHistory(this.store);
+    this.store = store || new Store(directory, safeStorage); this.history = history || new WorkspaceHistory(this.store); this.registry = registry || null;
+    this.approvalsPolicy = new ApprovalsPolicy(this.store);
+    this.connectionRemovals = registry?.connectionRemovals || new Set();
     // Biblioteket indlæses én gang. Funktionerne afgør, hvilke af dets skills appens AI kan hente.
     let library = null;
-    this.library = () => library ??= loadLibrary(profiles).catch(error => { library = null; throw error; });
+    this.library = sharedLibrary || (() => library ??= loadLibrary(profiles).catch(error => { library = null; throw error; }));
     this.features = new Features(this.store, this.library); this.skills = new Skills(this.library, this.store, this.features);
     // Versionen efter en opgave hører til den samtale, hvis opgave gemmes.
     this.git = new GitVersions();
     this.checkpoints = new Checkpoints(this.git, event => { const owner = this.checkpointOwner; if (owner) { owner.checkpointEvent(event); owner.emit(event); } else emit(event); });
-    this.engineFactory = engineFactory; this.profiles = profiles; this.emit = emit; this.catalogs = new Map(); this.catalogRequests = new Map();
+    this.engineFactory = engineFactory; this.profiles = profiles; this.emit = emit; this.catalogs = new Map(); this.catalogRequests = new Map(); this.connectionVersions = new Map();
     this.chats = new Map(); this.chatID = null; this.claims = new Map(); this.project = null; this.previewSelections = new Map();
     // Samtalernes Ændringer og Aktivitet, så længe appen er åben, også når projektet lukkes og åbnes igen.
     this.memory = new Map(); this.lastChatID = null; this.copies = new Copies(this.store); this.allocation = Promise.resolve();
   }
   // Den åbne samtale. Handlinger uden en bestemt samtale gælder den.
   get chat() { return this.chats.get(this.chatID) || null; }
-  get running() { return [...this.chats.values()].some(chat => chat.running || chat.sending); }
+  get running() { return [...this.chats.values()].some(chat => chat.running || chat.sending || chat.starting || chat.finishing); }
   get finishing() { return [...this.chats.values()].find(chat => chat.finishing)?.finishing || null; }
   get workspace() { return this.chat?.data || null; }
   // Motorer og forbindelser i brug, så forhåndsvisningen aldrig peger på dem.
@@ -50,7 +53,7 @@ class Workbench {
   // En samtales Ændringer og Aktivitet. De senest brugte huskes; en åben samtale glemmes aldrig.
   changesFor(id, root) {
     let changes = this.memory.get(id);
-    if (!changes) changes = { baseline: null, current: null, startedAt: null, tasks: [], activity: new Activity(entry => this.emit({ type: 'activity', root, entry, chat: id })) };
+    if (!changes) { const projectRoot = this.project?.root || root; changes = { baseline: null, current: null, startedAt: null, tasks: [], activity: new Activity(entry => this.emit({ type: 'activity', root: projectRoot, workspaceRoot: this.chats.get(id)?.root || root, entry, chat: id })) }; }
     this.memory.delete(id); this.memory.set(id, changes);
     for (const key of this.memory.keys()) if (this.memory.size > 8 && key !== id && !this.chats.has(key)) this.memory.delete(key);
     return changes;
@@ -92,9 +95,10 @@ class Workbench {
   }
 
   // ---------- Projekt og samtaler ----------
-  async state() {
-    const state = await this.store.read(), chat = this.chat;
-    return { connections: state.connections.filter(c => Object.hasOwn(connections.definitions, c.kind)).map(c => this.store.publicConnection(c)), retiredConnections: state.connections.filter(c => c.kind === 'komplai').map(c => ({ id: c.id, kind: c.kind, name: c.name, hasKey: Boolean(c.secret), account: { authMethod: c.account?.authMethod === 'token' ? 'token' : 'oauth' } })), definitions: connections.definitions, engineVersion: VERSION, projectSettings: this.project ? await this.store.project(this.project.root) : {}, running: this.running, workspace: chat?.data || null, historyWarning: this.historyWarning || chat?.historyWarning || '', usage: chat ? chat.currentUsage() : null, features: await this.features.get(this.project?.root), brief: this.project ? this.brief : null, plan: chat?.plan || null, lastPlan: chat?.lastPlan || null, chat: chat?.id || null, chatRunning: Boolean(chat?.running), workspaceRoot: chat?.root || this.project?.root, isolated: Boolean(chat?.copy), copy: chat?.copy ? { id: chat.copy.id, omissions: chat.copy.omissions } : null, chats: this.project ? await this.chatList() : [] };
+  async state(chatID) {
+    const chat = chatID ? this.chatFor(chatID) : this.chat, project = this.project;
+    const state = await this.store.read();
+    return { connections: state.connections.filter(c => Object.hasOwn(connections.definitions, c.kind)).map(c => this.store.publicConnection(c)), retiredConnections: state.connections.filter(c => c.kind === 'komplai').map(c => ({ id: c.id, kind: c.kind, name: c.name, hasKey: Boolean(c.secret), account: { authMethod: c.account?.authMethod === 'token' ? 'token' : 'oauth' } })), definitions: connections.definitions, engineVersion: VERSION, projectSettings: project ? await this.store.project(project.root) : {}, running: this.running, workspace: chat?.data || null, historyWarning: this.historyWarning || chat?.historyWarning || '', usage: chat ? chat.currentUsage() : null, features: await this.features.get(project?.root), brief: project ? this.brief : null, plan: chat?.plan || null, lastPlan: chat?.lastPlan || null, chat: chat?.id || null, chatRunning: Boolean(chat?.running), workspaceRoot: chat?.root || project?.root, isolated: Boolean(chat?.copy), copy: chat?.copy ? { id: chat.copy.id, omissions: chat.copy.omissions } : null, chats: project ? await this.chatList(project.root) : [] };
   }
   async activate(project) {
     await this.close();
@@ -119,6 +123,7 @@ class Workbench {
       const copy = data.copy?.id ? await this.copies.load(data.copy.id, this.project.root) : null;
       if (data.copy && !copy) { data.copy = null; await this.history.updateChat(this.project.root, id, item => { item.copy = null; }); }
       chat = new ChatSession(this, data, copy?.root || this.project.root); chat.copy = copy;
+      await chat.restoreConcretePlan();
       if (copy) chat.log({ kind: 'copy', title: 'Samtalens kopi er hentet', detail: 'Den er endnu ikke flettet ind i projektet.', status: 'completed' });
       this.chats.set(id, chat);
     } else await this.history.updateProject(this.project.root, project => { project.active = id; });
@@ -138,6 +143,23 @@ class Workbench {
     const chat = this.chats.get(data.id); if (chat) chat.data = { ...chat.data, title: data.title, renamed: data.renamed };
     this.chatsChanged();
     return { title: data.title };
+  }
+  async archiveChat(input) {
+    if (!this.project) throw new Error('Åbn et projekt først.');
+    const chat = this.chats.get(input?.id);
+    if (chat?.running || chat?.sending || chat?.starting || chat?.finishing) throw new Error('Vent, til opgaven er færdig, før du arkiverer samtalen.');
+    const archived = input?.archived !== false;
+    if (chat) chat.archiving = true;
+    let data;
+    try { data = await this.history.archiveChat(this.project.root, input?.id, archived); }
+    finally { if (chat) chat.archiving = false; }
+    if (chat) { chat.data = { ...chat.data, archived }; if (archived) chat.preparedInvalidated = true; }
+    if (archived && this.chatID === data.id) {
+      const project = await this.history.project(this.project.root);
+      this.chatID = null;
+      return project.active ? this.openChat(project.active) : this.newChat();
+    }
+    this.chatsChanged(); return this.state();
   }
   // Sletning flytter samtalen væk med remove, fx til papirkurven. En samtale, der arbejder, kan ikke slettes.
   async deleteChat(input, remove) {
@@ -163,7 +185,7 @@ class Workbench {
 
   // ---------- Det, der gælder hele projektet ----------
   // Uden en åben samtale, fx mens projektet genåbnes efter en gendannelse, logges i den samtale, der sidst var åben.
-  log(entry) { return this.chat ? this.chat.log(entry) : this.memory.get(this.lastChatID)?.activity.put(entry); }
+  log(entry, chatID) { const chat = chatID ? this.chats.get(chatID) : this.chat; return chat ? chat.log(entry) : this.memory.get(chatID || this.lastChatID)?.activity.put(entry); }
   activityList(id) { return this.chats.get(id || this.chatID)?.activityList() || []; }
   session(id) { return this.chats.get(id || this.chatID)?.session() || null; }
   // Efter en gendannelse beskriver planerne en anden version. Den åbne samtale nulstilles nu, de andre, når de åbnes.
@@ -197,10 +219,9 @@ class Workbench {
 
   // ---------- Forbindelser og modeller ----------
   async saveConnection(input) {
-    if (input?.kind === 'komplai' || (input?.id && (await this.connection(input.id)).kind === 'komplai')) throw new Error('komplai bruges nu kun til udgivelse via Del. Vælg en anden AI-forbindelse.');
-    if (this.running) throw new Error('Stop opgaverne, før du ændrer forbindelser.');
+    if (input?.kind === 'komplai' || (input?.id && (await this.connection(input.id)).kind === 'komplai')) throw new Error('komplai bruges nu kun til udgivelse via Udgiv. Vælg en anden AI-forbindelse.');
     const connection = connections.normalize(input);
-    await this.closeEngines();
+    connection.revision = crypto.randomUUID();
     await this.store.update(state => {
       const previous = state.connections.find(c => c.id === connection.id);
       if (input.id && !previous) throw new Error('Forbindelsen findes ikke.');
@@ -209,18 +230,46 @@ class Workbench {
       connection.secret = input.apiKey ? this.store.encrypt(input.apiKey) : (input.clearKey || previous?.kind !== connection.kind || previous?.baseURL !== connection.baseURL ? undefined : previous?.secret);
       state.connections = [...state.connections.filter(c => c.id !== connection.id), connection];
     });
-    this.catalogRequests.delete(connection.id); this.catalogs.delete(connection.id); for (const chat of this.chats.values()) chat.prepared = null;
+    await this.invalidateConnection(connection.id);
     return this.state();
   }
   async removeConnection(id) {
-    const connection = await this.connection(id);
-    if ([...this.chats.values()].some(chat => chat.running && chat.prepared?.connection?.id !== id)) throw new Error('Stop opgaverne først.');
-    if (connection.kind === 'komplai') {
-      for (const chat of this.chats.values()) if (chat.prepared?.connection?.id === id) { await chat.stop(); await chat.close(false); chat.prepared = null; }
-      // Et indsat token kan også bruges i andre programmer. Fjernelse her tilbagekalder kun Auras egne loginadgange.
-      if (connection.account?.authMethod !== 'token') await require('./komplai.cjs').disconnect(connection, this.store.decrypt(connection));
+    this.assertConnectionIdle(id);
+    if (this.connectionRemovals.has(id)) throw new Error('Forbindelsen er allerede ved at blive fjernet.');
+    this.connectionRemovals.add(id);
+    try {
+      const connection = await this.connection(id);
+      if (connection.kind === 'komplai') {
+        // Et indsat token kan også bruges i andre programmer. Fjernelse her tilbagekalder kun Auras egne loginadgange.
+        if (connection.account?.authMethod !== 'token') await require('./komplai.cjs').disconnect(connection, this.store.decrypt(connection));
+      }
+      await this.store.update(state => { this.assertConnectionIdle(id); state.connections = state.connections.filter(c => c.id !== id); });
+      await this.invalidateConnection(id); return this.state();
+    } finally { this.connectionRemovals.delete(id); }
+  }
+  assertConnectionIdle(id) {
+    const chats = this.registry ? this.registry.allChats() : [...this.chats.values()];
+    if (chats.some(chat => (chat.running || chat.sending || chat.starting || chat.finishing) && (chat.running || chat.starting || chat.finishing ? chat.runConnectionID || chat.prepared?.connection?.id : chat.prepared?.connection?.id) === id)) throw new Error('Forbindelsen bruges af en opgave. Vent, til den er færdig, eller stop den først.');
+  }
+  invalidateConnection(id) {
+    if (this.registry) return this.registry.invalidateConnection(id);
+    return this.connectionChanged(id);
+  }
+  connectionChanged(id) {
+    this.connectionVersions.set(id, (this.connectionVersions.get(id) || 0) + 1);
+    this.catalogRequests.delete(id); this.catalogs.delete(id);
+    const closing = [];
+    for (const chat of this.chats.values()) if (chat.prepared?.connection?.id === id) {
+      // Igangværende kald beholder deres forbindelse. Næste opgave skal forberedes med den nye revision.
+      chat.preparedInvalidated = true;
+      if (!chat.running && !chat.sending && !chat.starting && !chat.finishing) {
+        const operation = (chat.connectionClosing || Promise.resolve()).then(() => chat.close(false));
+        chat.connectionClosing = operation; closing.push(operation);
+        operation.finally(() => { if (chat.connectionClosing === operation) chat.connectionClosing = null; }).catch(() => {});
+      }
     }
-    if (this.running) throw new Error('Stop opgaverne først.'); await this.closeEngines(); await this.store.update(state => { state.connections = state.connections.filter(c => c.id !== id); }); this.catalogRequests.delete(id); this.catalogs.delete(id); return this.state(); }
+    return Promise.all(closing);
+  }
   async closeEngines() { for (const chat of this.chats.values()) if (!chat.running) await chat.close(false); }
   async connection(id) { const connection = (await this.store.read()).connections.find(c => c.id === id); if (!connection) throw new Error('Vælg en gemt forbindelse.'); return connection; }
   async models(id) {
@@ -243,6 +292,7 @@ class Workbench {
     const routes = await this.routes(connection.id, model.id);
     const route = routes.find(r => r.id === input.routeID);
     if (connection.kind === 'openrouter' && !route) throw new Error('Vælg en konkret OpenRouter-udbyder.');
+    if ((await this.connection(connection.id)).revision !== connection.revision) throw new Error('Forbindelsen blev ændret. Gennemgå oplysningerne igen.');
     await this.store.saveProject(this.project.root, { selection: { connectionID: connection.id, modelID: model.id, routeID: route?.id || '' } });
     return { connection, model, route };
   }
@@ -263,8 +313,8 @@ class Workbench {
   changedFiles(input) { return this.chats.get(input?.chat || this.chatID)?.changedFiles() || new Map(); }
   textEdit(input) { return this.chatFor(input?.chat).textEdit(input); }
   undoTask(input) { return this.chatFor(input?.chat).undoTask(input); }
-  recordEdit(input) { return this.chatFor().recordEdit(input); }
-  ensureBaseline() { return this.chatFor().ensureBaseline(); }
+  recordEdit(input) { return this.chatFor(input?.chat).recordEdit(input); }
+  ensureBaseline(chatID) { return this.chatFor(chatID).ensureBaseline(); }
   findTask(id) { for (const changes of this.memory.values()) { const task = changes.tasks.find(item => item.id === id); if (task) return task; } return null; }
   async mergeReview(input) {
     const chat = this.chatFor(input?.chat);

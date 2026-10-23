@@ -1,4 +1,4 @@
-// Det faktiske Del-forløb med lokale adaptere og filer fra et eksisterende commit.
+// Det faktiske udgivelsesforløb med lokale adaptere og filer fra et eksisterende commit.
 // Standardprøven opretter ingen Git-versioner og foretager ingen udgivelse på nettet.
 const { _electron: electron } = require('playwright');
 const assert = require('node:assert/strict');
@@ -27,12 +27,12 @@ const helpers = require('./ui-test-helpers.cjs');
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [project] }); if (live) return; globalThis.hostingLinks = []; shell.openExternal = async url => { globalThis.hostingLinks.push(url); };
       session.defaultSession.webRequest.onBeforeRequest((details, callback) => callback({ cancel: /^https?:/.test(details.url) }));
       globalThis.deploymentUploads = 0; globalThis.deploymentInspections = 0; globalThis.deploymentFetches = []; globalThis.deploymentFailure = false; globalThis.statusFailure = false; globalThis.inspectionFailure = false;
-      VercelDeployment.prototype.inspect = async () => { globalThis.deploymentInspections++; if (globalThis.inspectionFailure) throw Error('Vercel CLI er ikke installeret.'); return { id: 'prj_test', name: 'test', access: 'Syntetisk adgangskontrol', region: 'Ukendt', environmentKeys: [], portal: 'https://vercel.com/test/test' }; };
-      VercelDeployment.prototype.deploy = async () => { globalThis.deploymentUploads++; if (globalThis.deploymentFailure) throw Error('Syntetisk uploadfejl'); return { id: 'dpl_test', state: 'QUEUED', url: 'https://test.vercel.app' }; };
+      VercelDeployment.prototype.inspect = async () => { globalThis.deploymentInspections++; if (globalThis.inspectionPause) await globalThis.inspectionPause; if (globalThis.inspectionFailure) throw Error('Vercel CLI er ikke installeret.'); return { id: 'prj_test', name: 'test', access: 'Syntetisk adgangskontrol', region: 'Ukendt', environmentKeys: [], portal: 'https://vercel.com/test/test' }; };
+      VercelDeployment.prototype.deploy = async () => { globalThis.deploymentUploads++; if (globalThis.uploadPause) await globalThis.uploadPause; if (globalThis.deploymentFailure) throw Error('Syntetisk uploadfejl'); return { id: 'dpl_test', state: 'QUEUED', url: 'https://test.vercel.app' }; };
       VercelDeployment.prototype.status = async () => { if (globalThis.statusFailure) throw Error('Syntetisk statusfejl'); return { state: 'READY', url: 'https://test.vercel.app' }; };
       const { AzureSetup } = require('./azure-setup.cjs');
       const subscription = '11111111-2222-4333-8444-555555555555';
-      AzureSetup.prototype.state = async () => ({ status: 'ready', tools: { azureCli: true, swaCli: true }, subscriptions: [{ id: subscription, name: 'test-abonnement' }] });
+      AzureSetup.prototype.state = async () => { if (globalThis.setupPause) await globalThis.setupPause; return { status: 'ready', tools: { azureCli: true, swaCli: true }, subscriptions: [{ id: subscription, name: 'test-abonnement' }] }; };
       AzureSetup.prototype.apps = async id => { if (id !== subscription) throw Error('Forkert prøveabonnement.'); return [{ id: `/subscriptions/${subscription}/resourceGroups/test-gruppe/providers/Microsoft.Web/staticSites/Azure-test`, name: 'Azure-test', group: 'test-gruppe', subscription, location: 'westeurope', host: 'test.azurestaticapps.net' }]; };
       AzureDeployment.prototype.inspect = async () => ({ id: '/subscriptions/test/resourceGroups/test/providers/Microsoft.Web/staticSites/test', name: 'Azure-test', access: 'Testmiljø er ikke adgangsbeskyttelse', environmentKeys: [], portal: 'https://portal.azure.com/' });
       AzureDeployment.prototype.deploy = async () => { globalThis.deploymentUploads++; return { id: 'harness-test', state: 'UPLOADED', url: null }; };
@@ -46,7 +46,7 @@ const helpers = require('./ui-test-helpers.cjs');
     }, { project, modulePath: path.resolve(__dirname, '../core/deployments.cjs'), head, name, at, live });
     await helpers.skipIntroduction(page); await helpers.enableSharing(page); await page.click('#open'); await page.waitForSelector('#workspace:not([hidden])');
     const idle = () => page.waitForFunction(() => !document.querySelector('#deployment-fields').disabled);
-    const selectProvider = async id => { if (!await page.locator(`[data-provider="${id}"]`).isVisible()) await page.click('#deployment-more-providers'); await page.click(`[data-provider="${id}"]`); await idle(); };
+    const selectProvider = async id => { await page.click(`[data-provider="${id}"]`); await idle(); };
     const state = async () => (await page.evaluate(() => window.harness.deploymentState())).value;
     const reveal = async selector => { if (!await page.locator(selector).isVisible()) await page.locator('#deployment-receipt-details > summary').click(); };
     const check = async () => { await reveal('#deployment-check'); await page.click('#deployment-check'); await idle(); };
@@ -67,8 +67,8 @@ const helpers = require('./ui-test-helpers.cjs');
       await fs.writeFile(path.join(root, name + '.png'), Buffer.from(png, 'base64'));
       const providers = await page.locator('[data-deploy-step="providers"]').isVisible();
       if (await page.locator('[data-deploy-step="setupChoice"]').isVisible()) assert.ok(await page.locator('#deployment-dialog').evaluate(dialog => [...dialog.querySelectorAll('button,select,input[type=checkbox],input[type=radio],summary')].filter(el => el.checkVisibility() && !el.matches('[data-close],#deployment-back')).length <= 4), 'Det guidede valg har højst fire beslutningskontroller ud over Tilbage og Luk.');
-      if (providers) { const visible = await page.locator('[data-deploy-step="providers"] [data-provider]:visible').evaluateAll(items => items.map(item => item.dataset.provider)); assert.equal(visible.length, 3); assert.ok([['azure', 'cloudflare', 'github-pages'], ['komplai', 'promte', 'vercel']].some(expected => JSON.stringify(expected) === JSON.stringify(visible))); assert.equal(await page.locator('#deployment-more-providers').isVisible(), true); }
-      screens.push(await page.locator('#deployment-dialog').evaluate((dialog, { name, providers }) => ({ name, providers, setupChoice: !!dialog.querySelector('[data-deploy-step="setupChoice"]:not([hidden])'), details: [...dialog.querySelectorAll('#deployment-receipt-details[open], #deployment-technical[open]')].some(el => el.checkVisibility()), heading: document.getElementById(dialog.getAttribute('aria-labelledby')).textContent, words: dialog.innerText.trim().split(/\s+/).length, choices: [...dialog.querySelectorAll('button,select,input[type=checkbox],input[type=radio],summary')].filter(el => el.checkVisibility()).length, fields: [...dialog.querySelectorAll('input:not([type=hidden])')].filter(el => el.checkVisibility()).length, overflow: dialog.scrollWidth > dialog.clientWidth + 1 }), { name, providers }));
+      if (providers) { const visible = await page.locator('[data-deploy-step="providers"] [data-provider]:visible').evaluateAll(items => items.map(item => item.dataset.provider)); assert.deepEqual(visible, ['azure', 'cloudflare', 'github-pages', 'komplai', 'promte', 'vercel']); assert.equal(await page.locator('#deployment-more-providers').count(), 0); }
+      screens.push(await page.locator('#deployment-dialog').evaluate((dialog, { name, providers }) => ({ name, providers, result: !document.querySelector('#deployment-result').hidden, setupChoice: !!dialog.querySelector('[data-deploy-step="setupChoice"]:not([hidden])'), details: [...dialog.querySelectorAll('#deployment-receipt-details[open], #deployment-technical[open]')].some(el => el.checkVisibility()), heading: document.getElementById(dialog.getAttribute('aria-labelledby')).textContent, words: dialog.innerText.trim().split(/\s+/).length, choices: [...dialog.querySelectorAll('button,select,input[type=checkbox],input[type=radio],summary')].filter(el => el.checkVisibility()).length, fields: [...dialog.querySelectorAll('input:not([type=hidden])')].filter(el => el.checkVisibility()).length, overflow: dialog.scrollWidth > dialog.clientWidth + 1 }), { name, providers }));
     };
     if (live) {
       await page.click('#deploy-button'); await idle(); await page.click('#deployment-other'); await selectProvider('vercel'); await page.click('#deployment-vercel-once'); await idle();
@@ -88,7 +88,7 @@ const helpers = require('./ui-test-helpers.cjs');
     assert.equal((await app.evaluate(() => globalThis.hostingLinks)).length, 1); assert.equal(await app.evaluate(() => globalThis.deploymentUploads), 0);
     assert.equal((await page.evaluate(() => window.harness.deploymentGuideOpen({ id: 'https://example.invalid', kind: 'guide' }))).ok, false);
     await page.click('#deployment-back'); await page.click('#deployment-other'); await capture('udbyder');
-    assert.deepEqual(await page.locator('[data-deploy-step="providers"] [data-provider]').evaluateAll(items => items.map(item => item.dataset.provider)), ['azure', 'cloudflare', 'github-pages']);
+    assert.deepEqual(await page.locator('[data-deploy-step="providers"] [data-provider]').evaluateAll(items => items.map(item => item.dataset.provider)), ['azure', 'cloudflare', 'github-pages', 'komplai', 'promte', 'vercel']);
     assert.equal(await page.locator('[data-deploy-step="providers"] .primary').count(), 0);
     assert.deepEqual(await app.evaluate(() => ({ calls: globalThis.deploymentFetches, inspections: globalThis.deploymentInspections, uploads: globalThis.deploymentUploads })), { calls: [], inspections: 0, uploads: 0 });
     await selectProvider('vercel'); await page.click('#deployment-vercel-once'); await idle(); await capture('vercel-team'); await page.click('#deployment-provider-help'); await capture('vercel-opsaetning'); assert.match(await page.locator('#hosting-guide-setup').textContent(), /Vercel/); await page.click('#deployment-back');
@@ -96,11 +96,34 @@ const helpers = require('./ui-test-helpers.cjs');
     await next(); assert.equal(await page.evaluate(() => window.invalidDeploymentField), 'deploy-scope'); assert.equal(await app.evaluate(() => globalThis.deploymentInspections), 0);
     await page.fill('#deploy-scope', 'test'); await next(); await capture('vercel-projekt'); await page.fill('#deploy-project', 'test'); await next(); await capture('vercel-filer'); await app.evaluate(() => { globalThis.inspectionFailure = true; }); await next(); assert.match(await page.locator('#deployment-feedback').textContent(), /CLI er ikke installeret/); await capture('mangler-cli'); await page.click('#deployment-file-options'); await page.click('#deployment-change-destination'); await page.click('#deployment-provider-settings'); await capture('opsaetning-efter-fejl'); assert.match(await page.locator('#hosting-guide-setup').textContent(), /Vercel/); for (let back = 0; back < 3; back++) await page.click('#deployment-back'); await app.evaluate(() => { globalThis.inspectionFailure = false; });
     await page.click('#deployment-file-options'); await page.click('#deployment-change-files'); await capture('projekttype'); await page.selectOption('#deploy-mode', 'source'); await next(); await capture('filmappe'); await page.click('#deployment-back'); await page.selectOption('#deploy-mode', 'static'); await next(); await next();
-    await review(); assert.equal(await page.isVisible('#deployment-form'), false); assert.equal(await page.isVisible('#deployment-details'), false); assert.ok((await page.locator('#deployment-summary').textContent()).includes(name.slice(0, 32)), 'Gennemgangen viser versionens genkendelige navn.'); assert.match(await page.locator('#deployment-files').textContent(), /index.html/); assert.equal(await app.evaluate(() => globalThis.deploymentUploads), 0);
+    await app.evaluate(() => { globalThis.inspectionPause = new Promise(resolve => { globalThis.resumeInspection = resolve; }); });
+    const reviewing = review(); await page.waitForSelector('#deployment-progress:not([hidden])');
+    assert.equal(await page.getAttribute('#deployment-progress', 'role'), 'status'); assert.equal(await page.getAttribute('#deployment-progress', 'aria-live'), 'polite');
+    assert.equal(await page.getAttribute('#deployment-dialog', 'aria-busy'), 'true'); assert.equal(await page.isVisible('#deployment-progress .operation-spinner'), true);
+    assert.equal(await page.textContent('#deployment-feedback'), '', 'Gennemgangen gentager ikke arbejdsstatus under spinneren.');
+    await page.screenshot({ path: path.join(root, 'gennemgang-arbejder.png') });
+    await app.evaluate(() => { globalThis.resumeInspection(); globalThis.inspectionPause = null; }); await reviewing;
+    assert.equal(await page.getAttribute('#deployment-dialog', 'aria-busy'), 'false'); assert.equal(await page.isVisible('#deployment-progress'), false);
+    assert.equal(await page.isVisible('#deployment-form'), false); assert.equal(await page.isVisible('#deployment-details'), false); assert.ok((await page.locator('#deployment-summary').textContent()).includes(name.slice(0, 32)), 'Gennemgangen viser versionens genkendelige navn.'); assert.match(await page.locator('#deployment-files').textContent(), /index.html/); assert.equal(await app.evaluate(() => globalThis.deploymentUploads), 0);
     await capture('gennemgang'); assert.equal(await page.evaluate(() => document.activeElement.id), 'deployment-heading');
     await fs.writeFile(path.join(project, 'public/index.html'), 'Ændret efter gennemgangen'); await send(); assert.match(await page.locator('#deployment-feedback').textContent(), /Version eller destination har ændret/); assert.equal(await app.evaluate(() => globalThis.deploymentUploads), 0); await fs.writeFile(path.join(project, 'public/index.html'), content); await review();
-    await page.click('#deployment-edit'); assert.equal(await page.inputValue('#deploy-project'), 'test'); await review(); await send(); await check(); let receipt = (await state()).last;
+    await page.click('#deployment-edit'); assert.equal(await page.inputValue('#deploy-project'), 'test'); await review();
+    await app.evaluate(() => { globalThis.uploadPause = new Promise(resolve => { globalThis.resumeUpload = resolve; }); });
+    const sending = send(); await page.waitForSelector('#deployment-progress:not([hidden])');
+    assert.equal(await page.textContent('#deployment-progress-label'), 'Udgiver …'); assert.equal(await page.locator('#deployment-send').isDisabled(), true);
+    assert.equal(await page.textContent('#deployment-feedback'), 'Lukning af vinduet annullerer ikke udgivelsen.', 'Kun den særskilte oplysning om lukning står ved upload, uden endnu en arbejdsstatus.');
+    await page.screenshot({ path: path.join(root, 'udgivelse-arbejder.png') });
+    await app.evaluate(() => { globalThis.resumeUpload(); globalThis.uploadPause = null; }); await sending; assert.equal(await page.isVisible('#deployment-progress'), false); await check(); let receipt = (await state()).last;
     assert.match(receipt.verification, /kræver adgang/); assert.equal(await app.evaluate(() => globalThis.deploymentUploads), 1); await capture('resultat');
+    const savedDestination = (await state()).config; await page.click('#deployment-another');
+    assert.deepEqual(await page.locator('[data-deploy-step="providers"] [data-provider]:visible').evaluateAll(items => items.map(item => item.dataset.provider)), ['azure', 'cloudflare', 'github-pages', 'komplai', 'promte', 'vercel']);
+    assert.deepEqual((await state()).config, savedDestination, 'Et andet sted ændrer først den gemte destination ved en ny gennemgang.');
+    await app.evaluate(() => { globalThis.setupPause = new Promise(resolve => { globalThis.resumeSetup = resolve; }); });
+    const choosing = selectProvider('azure'); await page.waitForSelector('#deployment-progress:not([hidden])');
+    assert.equal(await page.textContent('#deployment-progress-label'), 'Arbejder …');
+    await app.evaluate(() => { globalThis.resumeSetup(); globalThis.setupPause = null; }); await choosing;
+    assert.deepEqual((await state()).config, savedDestination, 'Udbyderens konto kan ses uden at overskrive gemt udgivelse.');
+    await page.keyboard.press('Escape'); await page.click('#deploy-button'); await idle(); assert.equal(await page.isVisible('#deployment-result'), true);
     await app.evaluate(() => { globalThis.statusFailure = true; }); await check(); assert.match(await page.locator('#deployment-checks').textContent(), /Seneste statuskontrol mislykkedes/); assert.doesNotMatch(await page.locator('#deployment-checks').textContent(), /Udgivet ifølge/); assert.equal(await page.isVisible('#deployment-portal'), true); await capture('statusfejl');
     await page.keyboard.press('Escape'); assert.equal(await page.evaluate(() => document.activeElement.id), 'deploy-button'); await page.click('#deploy-button'); await idle(); assert.match(await page.locator('#deployment-checks').textContent(), /mislykkedes/);
     await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith('harness://')); w.setSize(980, 720); w.webContents.setZoomFactor(1.5); }); await capture('resultat-980-150');
@@ -112,7 +135,7 @@ const helpers = require('./ui-test-helpers.cjs');
     assert.equal(await page.locator('#deploy-mode option[value=source]').isDisabled(), true); await review(); assert.match(await page.locator('#deployment-summary').textContent(), /11111111-2222-4333-8444-555555555555.*test-gruppe.*harness-test.*erstatter/); assert.equal(await page.locator('#deployment-review-app-address').textContent(), 'Testadresse afventer udgivelse'); await capture('azure-gennemgang'); await send(); assert.equal(await page.locator('#deployment-open').evaluate(el => el.hidden), true); await check(); receipt = (await state()).last;
     assert.equal(receipt.checks.content.status, 'matched'); assert.match(await page.locator('#deployment-checks').textContent(), /HTTP 200 uden login.*matcher.*Testerens adgang.*Ikke afprøvet/); await capture('azure-resultat');
     // Guidet valg har højst fire kontroller plus navigationens Tilbage og Luk.
-    assert.ok(screens.every(screen => !screen.overflow)); assert.ok(screens.every(screen => screen.details || (screen.providers ? screen.choices === 6 : screen.setupChoice ? screen.choices <= 6 : screen.choices <= 4)), JSON.stringify(screens)); assert.deepEqual(errors, []);
+    assert.ok(screens.every(screen => !screen.overflow)); assert.ok(screens.every(screen => screen.details || (screen.providers ? screen.choices === 8 : screen.setupChoice ? screen.choices <= 6 : screen.result ? screen.choices <= 5 : screen.choices <= 4)), JSON.stringify(screens)); assert.deepEqual(errors, []);
     await fs.writeFile(path.join(root, 'skaermmaaling.json'), JSON.stringify(screens, null, 2)); await fs.writeFile(path.join(root, 'kvittering.json'), JSON.stringify(receipt, null, 2));
     console.log(JSON.stringify({ status: 'bestået', root, screens, sourceCommit: head, limitations: ['lokale adaptere og injiceret artifact-grænse', 'ingen rigtig Vercel- eller Azure-udgivelse', 'ingen Git-skrivninger'] }));
   } finally { await app?.close(); }

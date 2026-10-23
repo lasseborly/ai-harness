@@ -51,7 +51,45 @@ async function chooseLocation(app, page, folder) {
   await page.click('#choose-location');
   await page.waitForFunction(folder => document.querySelector('#project-location').title === folder, await require('node:fs/promises').realpath(folder));
 }
-// Deling og udgivelse er ikke med i den anbefalede pakke. Prøver af Del og Sikkerhedskopi slår den til og genindlæser siden.
+// Åbn prøvens eksisterende filer gennem brugerfladen. Opret projekt-knappen gemmer
+// automatisk en Git-version og må derfor ikke bruges i prøver uden Git-skrivninger.
+async function openExistingProject(app, page, folder) {
+  await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, folder);
+  await page.click('#open');
+  await page.waitForSelector('#workspace:not([hidden])');
+  await page.waitForFunction(folder => document.querySelector('#project-path').textContent === folder, await require('node:fs/promises').realpath(folder));
+}
+// Releaseprøverne må ikke gemme versioner, heller ikke via appens baggrundsarbejde.
+// Klassen bruges af de allerede oprettede Workbench-instanser; blokeringen ligger
+// derfor før de child_process-kald, som modulerne indlæste ved appstart.
+async function forbidGitWrites(app) {
+  await app.evaluate(({ app }) => {
+    const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
+    const { GitVersions } = require('./core/git.cjs');
+    const blocked = [];
+    for (const method of ['initialize', 'startProject', 'saveAll', 'setIdentity', 'commit']) {
+      GitVersions.prototype[method] = async () => { blocked.push(method); throw Error('Releaseprøven tillader ingen Git-skrivninger.'); };
+    }
+    const { Publishing } = require('./core/publishing.cjs');
+    for (const method of ['attach', 'push']) Publishing.prototype[method] = async () => { blocked.push(method); throw Error('Releaseprøven tillader ingen Git-publicering.'); };
+    globalThis.releaseGitWrites = blocked;
+  });
+  // Bevis, at den relevante grænse afviser commit, uden at starte Git.
+  const fires = await app.evaluate(async ({ app }) => {
+    const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
+    try { await new (require('./core/git.cjs').GitVersions)().commit('', {}); }
+    catch (error) {
+      if (globalThis.releaseGitWrites.pop() === 'commit' && /ingen Git-skrivninger/.test(error.message)) return true;
+    }
+    return false;
+  });
+  if (!fires) throw Error('Releaseprøvens Git-vagt blev ikke aktiveret.');
+}
+async function assertNoGitWrites(app) {
+  const blocked = await app.evaluate(() => globalThis.releaseGitWrites);
+  if (!Array.isArray(blocked) || blocked.length) throw Error('Appen forsøgte en Git-skrivning under releaseprøven: ' + JSON.stringify(blocked));
+}
+// Udgivelse er ikke med i den anbefalede pakke. Prøver af Udgiv og Sikkerhedskopi slår den til og genindlæser siden.
 async function enableSharing(page) {
   const result = await page.evaluate(() => window.harness.featuresSave({ scope: 'alle', values: { deling: true } }));
   if (!result.ok) throw new Error(result.error);
@@ -87,4 +125,4 @@ async function firstVersion(page, projectDir, title) {
   await fs.writeFile(index, (await fs.readFile(index, 'utf8')).replace('HER BEGYNDER DIN IDÉ', 'FØRSTE VERSION'));
   await page.frameLocator('#preview').locator('h1').filter({ hasText: title }).waitFor({ timeout: 15000 });
 }
-module.exports = { firstVersion, openSetup, addConnection, enableSharing, skipIntroduction, toOnboarding, menuClick, taskOptions, closeTaskOptions, selectMode, previewOptions, projectOptions, isolateDocuments, chooseLocation };
+module.exports = { firstVersion, openSetup, addConnection, enableSharing, skipIntroduction, toOnboarding, menuClick, taskOptions, closeTaskOptions, selectMode, previewOptions, projectOptions, isolateDocuments, chooseLocation, openExistingProject, forbidGitWrites, assertNoGitWrites };

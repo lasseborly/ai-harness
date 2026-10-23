@@ -170,8 +170,8 @@ test('funktionerne i appen dækker hele biblioteket og bygger kun på kendte fun
   assert.deepEqual(library.features.filter(feature => !feature.group).map(feature => feature.id), ['versioner', 'planlaegning', 'design', 'sikkerhed', 'kvalitet', 'deling']);
   assert.deepEqual(library.features.filter(feature => feature.group === 'integrationer').map(feature => feature.id), ['integration-adresser', 'integration-cvr', 'integration-promte', 'integration-komplai-run']);
   assert.deepEqual(library.features.flatMap(feature => feature.skills).sort(), library.skills.map(skill => skill.name).sort());
-  assert.deepEqual(library.features.find(feature => feature.id === 'deling').requires, ['versioner'], 'Del og sikkerhedskopi udgiver fra en gemt version');
-  assert.deepEqual(library.features.filter(feature => !feature.group && feature.default === false).map(feature => feature.id), ['deling'], 'Del er ikke med i den anbefalede pakke, så længe den kræver udviklerværktøjer');
+  assert.deepEqual(library.features.find(feature => feature.id === 'deling').requires, ['versioner'], 'Udgiv og sikkerhedskopi udgiver fra en gemt version');
+  assert.deepEqual(library.features.filter(feature => !feature.group && feature.default === false).map(feature => feature.id), ['deling'], 'Udgiv er ikke med i den anbefalede pakke, så længe den kræver udviklerværktøjer');
 });
 
 // Integrationsskills holder nøgler på en server og nævner de regler, der gælder for systemet.
@@ -186,5 +186,5 @@ test('integrationsskills holder nøgler på serveren og nævner systemets regler
   assert.match(text('harness-integration-adresser'), /Brug ikke DAWA/);
   assert.match(text('harness-integration-adresser'), /EPSG:25832/);
   for (const rule of [/§ 17/, /reklamebeskyttede/, /CPR-numre må aldrig/, /opdigtede virksomheder/]) assert.match(text('harness-integration-cvr'), rule);
-  for (const rule of [/PromteAppProvider/, /devDependencies/, /Kør dem kun, når brugeren har sagt ja/, /Bed aldrig brugeren indsætte et token/]) assert.match(text('harness-integration-promte'), rule);
+  for (const rule of [/PromteAppProvider/, /devDependencies/, /Kør dem kun, når brugeren har sagt ja/, /Bed aldrig brugeren indsætte et token/, /Udgiv → Promte Apps/, /Kør ikke upload-kommandoer fra Aura/, /Aura svarer som Promte/]) assert.match(text('harness-integration-promte'), rule);
 });

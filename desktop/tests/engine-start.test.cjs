@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { findExecutable, VERSION } = require('../core/engine.cjs');
+const { findExecutable, VERSION, isolatedEnv, writePluginRuntime, pluginRuntimeFiles, pluginRuntimePatterns } = require('../core/engine.cjs');
 
 // Små falske motorer som shell-scripts: en langsom, en med forkert version og en rigtig, der tæller sine kald.
 const unix = { skip: process.platform === 'win32' };
@@ -28,4 +28,26 @@ test('en kontrolleret motor kontrolleres kun én gang pr. kørsel', unix, async 
   assert.equal(await findExecutable({ bundled: { opencode: file }, timeout: 5000 }), file);
   assert.equal(await findExecutable({ bundled: { opencode: file }, timeout: 5000 }), file);
   assert.equal((await fs.readFile(path.join(dir, 'kald'), 'utf8')).trim().split('\n').length, 1);
+});
+test('plugin-opstart bruger den bundtede SDK og et isoleret hjem uden installation på nettet', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'aura-plugin-start-')); t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  await writePluginRuntime(dir); await writePluginRuntime(dir);
+  for (const folder of [path.join(dir, 'config'), path.join(dir, 'config', 'opencode')]) {
+    const manifest = JSON.parse(await fs.readFile(path.join(folder, 'package.json'), 'utf8'));
+    const lock = JSON.parse(await fs.readFile(path.join(folder, 'package-lock.json'), 'utf8'));
+    assert.equal(manifest.dependencies['@opencode-ai/plugin'], VERSION);
+    assert.deepEqual(lock.packages[''].dependencies, manifest.dependencies);
+    const sdk = JSON.parse(await fs.readFile(path.join(folder, 'node_modules', '@opencode-ai', 'plugin', 'package.json'), 'utf8'));
+    assert.equal(sdk.version, VERSION);
+  }
+  assert.ok((await pluginRuntimeFiles()).some(folder => folder.endsWith(path.join('@opencode-ai', 'sdk'))));
+  const env = isolatedEnv(dir, { plugin: ['file:///trusted-plugin.mjs'] }, 'syntetisk', { commandIsolation: true });
+  assert.equal(env.HOME, path.join(dir, 'home')); assert.equal(env.USERPROFILE, env.HOME); assert.equal(env.SHELL, '/bin/bash');
+  assert.equal(isolatedEnv(dir, { plugin: ['file:///read-guard.mjs'] }, 'syntetisk').SHELL, undefined);
+});
+test('pakkereglerne bevarer SDK-afhængigheder, når electron-builder flytter nested moduler til roden', async () => {
+  const { minimatch } = require('minimatch'), patterns = await pluginRuntimePatterns();
+  for (const file of ['node_modules/which/which.js', 'node_modules/isexe/index.js', 'node_modules/cross-spawn/node_modules/which/which.js', 'node_modules/@opencode-ai/plugin/dist/index.js']) {
+    assert.equal(patterns.some(pattern => minimatch(file, pattern)), true, file + ' skal kunne læses af den eksterne motor');
+  }
 });

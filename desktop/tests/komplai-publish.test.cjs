@@ -39,7 +39,11 @@ test('komplai Run: synlighed vælges altid, og adresse og app kontrolleres før 
   assert.throws(() => configuration({ provider: 'komplai', name: 'Budget', visibility: 'private', slug: 'admin' }), /Adressen kan ikke bruges/);
   assert.throws(() => configuration({ provider: 'komplai', appId: 'ikke-et-id', visibility: 'public' }), /Vælg en af dine apps/);
   assert.throws(() => configuration({ provider: 'komplai', name: '', visibility: 'public' }), /navn/);
-  assert.deepEqual(configuration({ provider: 'komplai', name: ' Budget ', slug: '', visibility: 'public' }), { provider: 'komplai', mode: 'static', directory: 'public', visibility: 'public', frontend: '.', api: '', name: 'Budget', slug: '' });
+  // En ny offentlig app bekræftes med appens navn, som Hub kræver.
+  assert.throws(() => configuration({ provider: 'komplai', name: 'Budget', slug: '', visibility: 'public' }), /bekræfte/);
+  assert.throws(() => configuration({ provider: 'komplai', name: 'Budget', slug: '', visibility: 'public', confirmPublic: 'budget' }), /bekræfte/);
+  assert.deepEqual(configuration({ provider: 'komplai', name: ' Budget ', slug: '', visibility: 'public', confirmPublic: 'Budget ' }), { provider: 'komplai', mode: 'static', directory: 'public', visibility: 'public', frontend: '.', api: '', name: 'Budget', confirmPublic: 'Budget', slug: '' });
+  assert.equal(configuration({ provider: 'komplai', name: 'Budget', visibility: 'private', confirmPublic: 'Andet' }).confirmPublic, undefined, 'en privat app sender ingen bekræftelse');
   assert.deepEqual(configuration({ provider: 'komplai', appId, visibility: 'private', directory: 'dist' }), { provider: 'komplai', mode: 'static', directory: 'dist', visibility: 'private', frontend: '.', api: '', appId });
 });
 
@@ -157,9 +161,42 @@ test('komplai Run: frisk adgang i Hub erstatter godkendelsens gamle adgang i kon
   assert.match(Object.fromEntries(require('../ui/share-view.js').checks(failed))['Aktuel adgang'], /Ikke kontrolleret/);
 });
 
-test('Hele pakken: Deling og udgivelse er med, når komplai Run er forbundet', () => {
+test('Hele pakken: Udgivelse er med, når komplai Run er forbundet', () => {
   const definitions = [{ id: 'versioner' }, { id: 'deling', requires: ['versioner'], default: false }];
   assert.equal(recommended(definitions, {}).find(f => f.id === 'deling').default, false);
   assert.equal(recommended(definitions, { hosting: { komplai: { secret: 'x' } } }).find(f => f.id === 'deling').default, true);
   assert.equal(recommended(definitions, { hosting: { github: { secret: 'x' } } }).find(f => f.id === 'deling').default, false);
+});
+
+test('komplai Run: en ny offentlig app oprettes for organisationen og gøres offentlig med bekræftelsen før upload', async t => {
+  const store = await connectedStore(t), calls = [];
+  let refuse = null;
+  const app = { id: appId, name: 'Budget', slug: 'budget', url: 'https://budget.komplai.run', visibility: 'private', releases: [] };
+  const fetcher = async (url, options) => {
+    const route = url.replace('https://hub.komplai.dk', '');
+    calls.push({ route, method: options.method, body: options.headers['Content-Type'] === 'application/json' ? JSON.parse(options.body) : null });
+    if (route === '/api/publish/native/apps') return refuse ? Response.json({ error: refuse }, { status: 403 }) : Response.json({ ...app, activeRelease: null });
+    if (route === `/api/publish/native/apps/${appId}`) { if (calls.at(-1).body.confirmPublic !== 'Budget') return Response.json({ error: 'public_confirmation' }, { status: 403 }); app.visibility = 'public'; return Response.json(app); }
+    if (route === `/api/publish/${appId}/releases`) return Response.json({ ...app, activeRelease: 'r1' });
+    if (route === '/api/publish/native') return Response.json({ address: 'komplai.run', slugs: true, apps: [{ ...app, activeRelease: 'r1' }] });
+    throw Error('Uventet ' + route);
+  };
+  const provider = new KomplaiDeployment(store, { fetcher });
+  const files = [{ file: 'index.html', data: Buffer.from('<h1>Budget</h1>') }];
+  const created = [];
+  await provider.deploy({ name: 'Budget', visibility: 'public', confirmPublic: 'Budget' }, { files }, { id: null }, { onCreated: async id => created.push(id) });
+  assert.deepEqual(calls.map(c => [c.method, c.route]), [['POST', '/api/publish/native/apps'], ['PATCH', `/api/publish/native/apps/${appId}`], ['POST', `/api/publish/${appId}/releases`], ['GET', '/api/publish/native']]);
+  assert.deepEqual(calls[0].body, { name: 'Budget', visibility: 'private' });
+  assert.deepEqual(calls[1].body, { visibility: 'public', confirmPublic: 'Budget' });
+  assert.deepEqual(created, [appId], 'appen gemmes, før den gøres offentlig');
+  // En forkert bekræftelse stopper før upload; appen er oprettet og gemt for organisationen.
+  calls.length = 0; app.visibility = 'private';
+  await assert.rejects(provider.deploy({ name: 'Budget', visibility: 'public', confirmPublic: 'budget' }, { files }, { id: null }), /Skriv appens navn præcis/);
+  assert.equal(calls.some(c => c.route.endsWith('/releases')), false);
+  // En privat app ændrer aldrig adgang, og Hubs afvisninger vises på dansk.
+  calls.length = 0; refuse = 'invalid_manifest';
+  await assert.rejects(provider.deploy({ name: 'Budget', visibility: 'private' }, { files }, { id: null }), /komplai\.json kan ikke bruges/);
+  refuse = 'public_on_create';
+  await assert.rejects(provider.deploy({ name: 'Budget', visibility: 'private' }, { files }, { id: null }), /opretter nye apps for organisationen/);
+  assert.equal(calls.some(c => c.method === 'PATCH'), false);
 });

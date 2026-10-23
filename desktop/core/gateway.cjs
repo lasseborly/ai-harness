@@ -5,7 +5,9 @@ const { StreamProgress } = require('./stream-progress.cjs');
 
 const IDLE_LIMIT = 120_000, TOTAL_LIMIT = 20 * 60_000;
 // Kun agentmotoren får en midlertidig adgangskode. Den rigtige modelnøgle bliver i hovedprocessen.
-async function startGateway(connection, model, key, route, onFailure = () => {}, { idleLimit = IDLE_LIMIT, totalLimit = TOTAL_LIMIT, onProgress = () => {}, root = '' } = {}) {
+async function startGateway(connection, model, key, route, onFailure = () => {}, { idleLimit = IDLE_LIMIT, totalLimit = TOTAL_LIMIT, onProgress = () => {}, root = '', effort: initialEffort = null } = {}) {
+  // Brugerens valgte indsats kan skifte mellem beskeder uden at starte en ny modelsession.
+  let effort = initialEffort;
   assertSupported(connection);
   const token = randomBytes(32).toString('hex');
   const active = new Set();
@@ -40,6 +42,12 @@ async function startGateway(connection, model, key, route, onFailure = () => {},
         body.provider = { only: [route.id], allow_fallbacks: false };
         if (model.id.endsWith(':free')) body.provider.max_price = { prompt: 0, completion: 0, request: 0, image: 0 };
       }
+      // Brugerens valgte indsats sættes, som udbyderen forventer. Uden et valg sendes udbyderens eget udgangspunkt uændret.
+      if (effort) {
+        if (anthropic) body.output_config = { ...(body.output_config || {}), effort };
+        else if (responses || connection.kind === 'openrouter') body.reasoning = { ...(body.reasoning || {}), effort };
+        else body.reasoning_effort = effort;
+      }
       const base = connection.kind === 'ollama' ? `${connection.baseURL}/v1` : connection.baseURL;
       const headers = { 'content-type': 'application/json' };
       if (anthropic) { headers['anthropic-version'] = '2023-06-01'; if (key) headers['x-api-key'] = key; }
@@ -71,6 +79,6 @@ async function startGateway(connection, model, key, route, onFailure = () => {},
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   origin = `http://127.0.0.1:${server.address().port}`;
-  return { url: `${origin}/v1`, token, abort: () => { stopped = true; for (const controller of active) controller.abort(); }, close: () => new Promise(resolve => { stopped = true; for (const controller of active) controller.abort(); server.close(resolve); server.closeAllConnections(); }) };
+  return { url: `${origin}/v1`, token, setEffort: value => { effort = value || null; }, abort: () => { stopped = true; for (const controller of active) controller.abort(); }, close: () => new Promise(resolve => { stopped = true; for (const controller of active) controller.abort(); server.close(resolve); server.closeAllConnections(); }) };
 }
 module.exports = { startGateway };

@@ -1,0 +1,235 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const os = require('node:os');
+const { WorkspaceRegistry } = require('../core/workspaces.cjs');
+const profiles = path.join(__dirname, '../../profiles');
+const safeStorage = { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() };
+async function setup(t) {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'aura-workspaces-'));
+  const events = [], engines = [];
+  const registry = new WorkspaceRegistry({ directory: path.join(directory, 'data'), profiles, safeStorage, emit: event => events.push(event), engineFactory: options => {
+    const engine = { options, active: false, session: { id: 'session-' + engines.length }, pending: new Map(), sent: [], closed: 0, start: async () => { engine.active = true; }, send: async (text, system) => engine.sent.push({ text, system }), reply: async id => engine.pending.delete(id), abort: async () => {}, close: async () => { engine.closed++; engine.active = false; } };
+    engines.push(engine); return engine;
+  } });
+  t.after(async () => { await registry.close(); await fs.rm(directory, { recursive: true, force: true }); });
+  const projects = await Promise.all(['a', 'b', 'c'].map(async name => { const root = path.join(directory, name); await fs.mkdir(root); await fs.writeFile(path.join(root, 'index.html'), name); return { root: await fs.realpath(root), name }; }));
+  return { registry, directory, projects, engines, events };
+}
+function prepare(chat, connection, modelID) {
+  const fingerprint = `${connection.id}:${connection.revision || 'first'}:${modelID}`;
+  chat.prepared = { mode: 'free', root: chat.root, connection, model: { id: modelID }, references: [], autoCheckpoint: false,
+    disclosure: { fingerprint, consentKey: 'test', modelName: modelID }, context: { rules: '', skills: [], features: { versioner: false } } };
+  chat.preparedInvalidated = false; return fingerprint;
+}
+test('tre projekter beholder hver sin motor, model, besked, hændelser og opgave ved projektskift', async t => {
+  const { registry, projects, engines, events } = await setup(t);
+  const benches = [];
+  for (let i = 0; i < projects.length; i++) {
+    const bench = await registry.select(projects[i]); benches.push(bench);
+    const fingerprint = prepare(bench.chat, { id: `connection-${i}`, kind: 'compatible', baseURL: 'http://127.0.0.1:1/v1', name: 'Syntetisk' }, `model-${i}`);
+    await bench.send({ text: `Besked ${i}`, fingerprint });
+  }
+  assert.equal(registry.running, true); assert.equal(registry.allChats().length, 3); assert.equal(engines.length, 3);
+  assert.deepEqual(engines.map(engine => engine.options.model.id), ['model-0', 'model-1', 'model-2']);
+  assert.equal(new Set(engines.map(engine => engine.options.directory)).size, 3);
+  const original = benches[0].chat, originalEngine = original.engine;
+  assert.equal(await registry.select(projects[0]), benches[0]); assert.equal(registry.selected.chat, original);
+  assert.equal(original.engine, originalEngine); assert.equal(engines.every(engine => !engine.closed), true);
+  assert.equal(registry.servers().length, 3);
+  engines[2].options.onEvent({ type: 'message.updated', properties: { info: { id: 'late', role: 'assistant' } } });
+  assert.equal(events.at(-1).root, projects[2].root); assert.equal(events.at(-1).chat, benches[2].chat.id);
+  assert.equal(registry.selected, benches[0]);
+  for (const bench of benches) { bench.chat.event({ type: 'session.idle' }); await bench.chat.finishing; }
+  assert.equal(registry.running, false);
+  for (let i = 0; i < projects.length; i++) assert.equal((await registry.history.readChat(projects[i].root, benches[i].chat.id)).messages[0].text, `Besked ${i}`);
+});
+test('normaliseret sti og symbolsk alias deler arbejdsbænk, mens samtidige indstillingsskrivninger bevares', async t => {
+  const { registry, directory, projects } = await setup(t);
+  const alias = path.join(directory, 'alias'); await fs.symlink(projects[0].root, alias, 'dir');
+  const [a, b] = await Promise.all([registry.select(projects[0]), registry.select({ ...projects[0], root: alias })]);
+  assert.equal(a, b); assert.equal(registry.get(alias), a); assert.equal([...registry.values()].length, 1);
+  const c = await registry.select(projects[1]); assert.equal(a.store, c.store); assert.equal(a.history, c.history);
+  await Promise.all([a.store.saveProject(a.project.root, { selection: { modelID: 'a' } }), c.store.saveProject(c.project.root, { selection: { modelID: 'b' } })]);
+  assert.equal((await a.store.project(a.project.root)).selection.modelID, 'a'); assert.equal((await c.store.project(c.project.root)).selection.modelID, 'b');
+  registry.deselect(); assert.equal(registry.selected, registry.empty); assert.equal(registry.get(projects[0].root), a);
+  assert.equal(await registry.select(projects[0]), a);
+});
+test('en forbindelsesændring under forberedelsen kan ikke genindføre gamle credentials', async t => {
+  const { registry, projects } = await setup(t), bench = await registry.select(projects[0]);
+  const saved = await bench.saveConnection({ kind: 'compatible', name: 'Før', baseURL: 'http://127.0.0.1:1/v1' }), connection = await bench.connection(saved.connections[0].id);
+  bench.selection = async () => ({ connection, model: { id: 'test' }, route: null });
+  let entered, release; const ready = new Promise(resolve => { entered = resolve; }), blocked = new Promise(resolve => { release = resolve; });
+  bench.skills.context = async () => { entered(); await blocked; return { rules: '', skills: [], titles: [], features: {}, integrations: [] }; };
+  const preparing = bench.prepare({ connectionID: connection.id, modelID: 'test', mode: 'free' });
+  const rejected = assert.rejects(preparing, /Forbindelsen blev ændret/);
+  await ready; await bench.saveConnection({ id: connection.id, kind: 'compatible', name: 'Efter', baseURL: connection.baseURL }); release(); await rejected;
+  assert.equal(bench.chat.prepared, null);
+});
+test('Samtale til Byg bevarer idéen uden plan, også efter kladdens mode er ændret', async t => {
+  const { registry, projects, engines } = await setup(t), bench = await registry.select(projects[0]);
+  const saved = await bench.saveConnection({ kind: 'compatible', name: 'Prøve', baseURL: 'http://127.0.0.1:1/v1' }), connection = await bench.connection(saved.connections[0].id);
+  bench.selection = async () => ({ connection, model: { id: 'test' }, route: null });
+  bench.skills.context = async () => ({ rules: '', skills: [], titles: [], features: {}, integrations: [] });
+  bench.chat.data = await bench.history.updateChat(bench.project.root, bench.chat.id, data => {
+    data.lastRunMode = 'chat'; data.mode = 'free';
+    data.messages = [{ id: 'idé', role: 'user', text: 'Byg en app til 17 blå cykler.' }, { id: 'svar', role: 'assistant', text: 'Vi bruger en oversigt med antal og farve.' }];
+  });
+  const input = { connectionID: connection.id, modelID: 'test', mode: 'free', includeHistory: false };
+  const disclosure = await bench.prepare(input);
+  assert.equal(disclosure.historyIncluded, true); assert.match(disclosure.conversation, /17 blå cykler/);
+  await bench.send({ text: 'Sæt i gang!', fingerprint: disclosure.fingerprint });
+  assert.equal(engines[0].sent[0].text, 'Sæt i gang!'); assert.match(engines[0].sent[0].system, /17 blå cykler/);
+  assert.doesNotMatch(engines[0].sent[0].system, /Aktuel arbejdsmåde: Samtale/);
+  bench.chat.event({ type: 'session.idle' }); await bench.chat.finishing;
+  const second = await bench.prepare(input); assert.equal(second.fingerprint, disclosure.fingerprint, 'overdragelsens historik starter ikke endnu en tom motor');
+  await bench.send({ text: 'Fortsæt med detaljerne', fingerprint: second.fingerprint });
+  assert.equal(engines.length, 1); assert.equal(engines[0].sent[1].system.match(/17 blå cykler/g).length, 1);
+  bench.chat.event({ type: 'session.idle' }); await bench.chat.finishing;
+});
+test('et konkret forslag i Samtale bliver en valgbar plan og gendannes fra ældre historik', async t => {
+  const { registry, projects, events } = await setup(t), bench = await registry.select(projects[0]), chat = bench.chat;
+  const plan = '## Det bygger vi\nEn cykeloversigt.\n## Sådan skal det se ud\nBlå kort.\n## Teknik og data\nLokale prøveværdier.\n## Det skal du prøve (i forhåndsvisningen)\nTilføj en cykel.\n<!-- aura:offer-plan -->';
+  chat.running = true; chat.runMode = 'chat'; chat.runUser = { id: 'u', role: 'user', text: 'Jeg vil samle mine cykler.' };
+  chat.runRoles.set('m', 'assistant'); chat.runText.set('p', { id: 'p', messageID: 'm', text: plan });
+  chat.event({ type: 'session.idle' }); await chat.finishing;
+  assert.ok(chat.plan); assert.equal(events.some(event => event.type === 'plan.offer' && event.offered), false);
+  assert.equal((await registry.history.readChat(projects[0].root, chat.id)).planOffer, false);
+  const saved = chat.plan.text;
+  await registry.history.updateChat(projects[0].root, chat.id, data => { data.plan = null; data.planOffer = true; data.planConversation = []; });
+  await bench.close(); bench.chats.clear(); await bench.openChat(chat.id);
+  assert.equal(bench.chat.plan.text, saved); assert.equal(bench.chat.data.planOffer, false);
+  assert.ok((await registry.history.readChat(projects[0].root, chat.id)).plan);
+});
+test('simuleret Windows bevarer filopgaver og enkeltgodkendelse trods en husket bash-regel', async t => {
+  const { registry, projects, engines, events } = await setup(t), bench = await registry.select(projects[0]);
+  const saved = await bench.saveConnection({ kind: 'compatible', name: 'Prøve', baseURL: 'http://127.0.0.1:1/v1' }), connection = await bench.connection(saved.connections[0].id);
+  bench.selection = async () => ({ connection, model: { id: 'test' }, route: null });
+  bench.skills.context = async () => ({ rules: '', skills: [], titles: [], features: {}, integrations: [] });
+  const p = { id: 'kommando', permission: 'bash', metadata: { command: 'node lokal.cjs', workdir: bench.project.root }, patterns: [] };
+  await bench.approvalsPolicy.grant({ projectRoot: bench.project.root, workspaceRoot: bench.project.root, mode: 'free', commandSandboxSupported: true }, p, { scope: 'project' });
+  t.mock.method(require('../core/command-sandbox.cjs'), 'support', async () => ({ available: false, platform: 'win32', reason: 'Isolation understøttes endnu ikke på Windows.' }));
+  const input = { connectionID: connection.id, modelID: 'test', mode: 'free' }, disclosure = await bench.prepare(input);
+  assert.equal(bench.chat.prepared.commandIsolation, false);
+  await bench.send({ text: 'Ret projektfilen', fingerprint: disclosure.fingerprint });
+  assert.equal(engines[0].options.sandbox, null, 'en filopgave kan starte som før');
+  engines[0].pending.set(p.id, p); await bench.chat.permissionAsked({ type: 'permission.asked', properties: p });
+  const permission = events.filter(event => event.type === 'permission.asked').at(-1);
+  assert.equal(permission.properties.policy.persistable, false); assert.equal(engines[0].pending.has(p.id), true);
+  await bench.reply({ id: p.id, allow: true }); assert.equal(engines[0].pending.has(p.id), false, 'enkeltgodkendelse bevares');
+  bench.chat.event({ type: 'session.idle' }); await bench.chat.finishing;
+  await bench.approvalsPolicy.setCommands(bench.project.root, true);
+  await assert.rejects(bench.prepare(input), /Windows/);
+});
+test('gamle forbindelser og workspace-v1 åbner og kan sende uden nye tilvalg på simuleret Windows', async t => {
+  const { registry, projects, engines } = await setup(t), project = projects[0]; registry.store.platform = 'win32';
+  const connection = { id: 'gammel', kind: 'compatible', name: 'Eksisterende forbindelse', baseURL: 'http://127.0.0.1:1/v1', secret: Buffer.from('syntetisk-gammel-nøgle').toString('base64') };
+  await registry.store.update(state => { state.connections.push(connection); state.projects[registry.store.projectKey(project.root)] = { selection: { connectionID: connection.id, modelID: 'gammel-model' } }; });
+  const oldFile = registry.history.file(project.root); await fs.mkdir(path.dirname(oldFile), { recursive: true });
+  await fs.writeFile(oldFile, JSON.stringify({ version: 1, draft: 'Fortsæt herfra', mode: 'chat', messages: [{ id: 'gammel-idé', role: 'user', text: 'Bevar den eksisterende idé.' }], plan: null, planConversation: [], status: 'idle', updatedAt: new Date().toISOString() }));
+  t.mock.method(require('../core/command-sandbox.cjs'), 'support', async () => ({ available: false, platform: 'win32', reason: 'Isolation understøttes endnu ikke på Windows.' }));
+  const bench = await registry.select(project);
+  assert.equal(bench.chat.data.draft, 'Fortsæt herfra'); assert.equal(bench.chat.data.messages[0].text, 'Bevar den eksisterende idé.');
+  assert.equal((await registry.history.project(project.root)).version, 2);
+  assert.equal(bench.store.decrypt(await bench.connection(connection.id)), 'syntetisk-gammel-nøgle');
+  assert.deepEqual(await bench.approvalsPolicy.settings(project.root), { autoProjectFiles: false, autoCommands: false, rules: [] });
+  bench.selection = async () => ({ connection: await bench.connection(connection.id), model: { id: 'gammel-model' }, route: null });
+  bench.skills.context = async () => ({ rules: '', skills: [], titles: [], features: {}, integrations: [] });
+  const disclosure = await bench.prepare({ connectionID: connection.id, modelID: 'gammel-model', mode: 'free' });
+  await bench.send({ text: 'Sæt i gang!', fingerprint: disclosure.fingerprint });
+  assert.equal(engines[0].options.sandbox, null); assert.match(engines[0].sent[0].system, /Bevar den eksisterende idé/);
+  bench.chat.event({ type: 'session.idle' }); await bench.chat.finishing;
+  assert.equal((await bench.connection(connection.id)).secret, connection.secret);
+});
+test('et forsinket svar og registrerede rettelser beholder den oprindelige samtale', async t => {
+  const { registry, projects } = await setup(t), bench = await registry.select(projects[0]), first = bench.chat;
+  await first.saveDraft({ text: 'Bevar første samtale', mode: 'chat' });
+  await bench.newChat(); const second = bench.chat;
+  assert.notEqual(first.id, second.id);
+  let release, entered; const blocked = new Promise(resolve => { release = resolve; }), ready = new Promise(resolve => { entered = resolve; });
+  const read = bench.store.read.bind(bench.store); let once = true;
+  bench.store.read = async () => { if (once) { once = false; entered(); await blocked; } return read(); };
+  const pending = bench.state(first.id); await ready; bench.chatID = second.id; release();
+  assert.equal((await pending).chat, first.id);
+  await bench.ensureBaseline(first.id);
+  bench.recordEdit({ chat: first.id, kind: 'edit', label: 'Første', files: [] });
+  bench.log({ kind: 'edit', title: 'Kun første', status: 'completed' }, first.id);
+  assert.equal(first.changes.tasks.at(-1).label, 'Første'); assert.equal(second.changes.tasks.length, 0);
+  assert.equal(first.activityList().some(entry => entry.title === 'Kun første'), true);
+  assert.equal(second.activityList().some(entry => entry.title === 'Kun første'), false);
+});
+test('en redigeret forbindelse bevarer aktive credentials og invaliderer kun dens næste opgaver i alle projekter', async t => {
+  const { registry, projects, engines } = await setup(t), a = await registry.select(projects[0]), b = await registry.select(projects[1]);
+  const saved = await a.saveConnection({ kind: 'compatible', name: 'Før', baseURL: 'http://127.0.0.1:1/v1', apiKey: 'syntetisk-før' });
+  const id = saved.connections[0].id, first = await a.connection(id);
+  const fingerprint = prepare(a.chat, first, 'model-a'); prepare(b.chat, first, 'model-b');
+  a.catalogs.set(id, ['før']); b.catalogs.set(id, ['før']); a.catalogRequests.set(id, Symbol()); b.catalogRequests.set(id, Symbol());
+  await a.send({ text: 'Bliv ved', fingerprint });
+  await b.saveConnection({ id, kind: 'compatible', name: 'Efter', baseURL: first.baseURL, apiKey: 'syntetisk-efter' });
+  assert.equal(a.chat.running, true); assert.equal(engines[0].closed, 0);
+  assert.equal(a.store.decrypt(a.chat.prepared.connection), 'syntetisk-før'); assert.equal(b.store.decrypt(await b.connection(id)), 'syntetisk-efter');
+  assert.equal(a.chat.preparedInvalidated, true); assert.equal(b.chat.preparedInvalidated, true);
+  assert.equal(a.catalogs.has(id), false); assert.equal(b.catalogRequests.has(id), false);
+  await assert.rejects(b.removeConnection(id), /bruges af en opgave/);
+  await assert.rejects(b.send({ text: 'Forældet', fingerprint: b.chat.prepared.disclosure.fingerprint }), /aktuelle/);
+  const unrelated = (await b.saveConnection({ kind: 'compatible', name: 'Anden', baseURL: first.baseURL })).connections.find(item => item.id !== id);
+  await b.removeConnection(unrelated.id); assert.equal(a.chat.running, true);
+  a.chat.event({ type: 'session.idle' }); await a.chat.finishing;
+  const next = await a.connection(id); assert.notEqual(next.revision, first.revision);
+  await a.send({ text: 'Ny nøgle', fingerprint: prepare(a.chat, next, 'model-a') });
+  assert.equal(engines.length, 2); assert.equal(engines[0].closed, 1);
+  a.chat.event({ type: 'session.idle' }); await a.chat.finishing;
+  await b.removeConnection(id); await assert.rejects(a.connection(id), /gemt forbindelse/);
+});
+test('en opgave kan ikke starte, mens dens forbindelse fjernes i et andet projekt', async t => {
+  const { registry, projects } = await setup(t), a = await registry.select(projects[0]), b = await registry.select(projects[1]);
+  const saved = await a.saveConnection({ kind: 'compatible', name: 'Prøve', baseURL: 'http://127.0.0.1:1/v1' }), connection = await a.connection(saved.connections[0].id);
+  const fingerprint = prepare(b.chat, connection, 'model');
+  let entered, release; const ready = new Promise(resolve => { entered = resolve; }), blocked = new Promise(resolve => { release = resolve; });
+  const readConnection = a.connection.bind(a); a.connection = async id => { entered(); await blocked; return readConnection(id); };
+  const removal = a.removeConnection(connection.id); await ready;
+  await assert.rejects(b.send({ text: 'Må ikke starte', fingerprint }), /ved at blive fjernet/);
+  release(); await removal; assert.equal(b.chat.running, false); assert.equal(b.chat.preparedInvalidated, true);
+  assert.equal(registry.connectionRemovals.size, 0);
+});
+test('arkivering bevarer samtalefilen, kræver ledig opgave og genbruger aldrig en arkiveret tom samtale', async t => {
+  const { registry, projects } = await setup(t), bench = await registry.select(projects[0]), original = bench.chat;
+  const chatFile = bench.history.chatFile(bench.project.root, original.id);
+  original.sending = true; await assert.rejects(bench.archiveChat({ id: original.id }), /færdig/); original.sending = false;
+  await bench.archiveChat({ id: original.id });
+  assert.notEqual(bench.chat.id, original.id); assert.equal(JSON.parse(await fs.readFile(chatFile, 'utf8')).archived, true);
+  assert.equal((await bench.chatList()).find(item => item.id === original.id).archived, true);
+  await bench.openChat(original.id); await assert.rejects(bench.send({ text: 'Skal afvises' }), /arkivet/);
+  await bench.archiveChat({ id: original.id, archived: false }); assert.equal(bench.chat.data.archived, false);
+  await bench.archiveChat({ id: original.id });
+  const other = new WorkspaceRegistry({ directory: registry.store.root, profiles, safeStorage, emit: () => {} });
+  const reopened = await other.select(projects[0]); assert.notEqual(reopened.chat.id, original.id);
+  assert.equal((await reopened.chatList()).find(item => item.id === original.id).archived, true); await other.close();
+});
+test('godkendelser kan grupperes inden for samme projekt, huskes ved nyt besøg og genvalideres før svar', async t => {
+  const { registry, projects, events } = await setup(t), a = await registry.select(projects[0]), b = await registry.select(projects[1]);
+  const fake = chat => { chat.running = true; chat.runMode = 'free'; chat.engine = { pending: new Map(), replies: [], reply: async (id, allow) => { chat.engine.replies.push([id, allow]); chat.engine.pending.delete(id); }, close: async () => {} }; return chat; };
+  const first = fake(a.chat), second = fake(b.chat);
+  const ask = async (chat, id, permission, metadata) => { const properties = { id, permission, metadata, patterns: [] }; chat.engine.pending.set(id, properties); await chat.event({ type: 'permission.asked', properties }); };
+  await ask(first, 'a1', 'edit', { filepath: path.join(first.root, 'one.txt') });
+  await ask(first, 'a2', 'edit', { filepath: path.join(first.root, 'two.txt') });
+  assert.equal(first.approvals.get('a1').descriptor.key, first.approvals.get('a2').descriptor.key);
+  await first.reply({ ids: ['a1', 'a2'], allow: true, scope: 'project' });
+  assert.deepEqual(first.engine.replies, [['a1', true], ['a2', true]]);
+  await ask(first, 'a3', 'edit', { filepath: path.join(first.root, 'three.txt') });
+  assert.equal(first.engine.replies.length, 3); assert.equal(events.at(-1).type, 'permission.auto');
+  await ask(second, 'b1', 'edit', { filepath: path.join(second.root, 'other.txt') });
+  assert.equal(second.engine.replies.length, 0); assert.equal(events.at(-1).properties.id, 'b1');
+  await ask(second, 'b2', 'webfetch', { url: 'https://example.test/' });
+  await assert.rejects(second.reply({ ids: ['b1', 'b2'], allow: true }), /hver for sig/);
+  assert.equal(second.engine.replies.length, 0);
+  const outside = path.join(projects[2].root, 'outside'); await fs.mkdir(outside);
+  const link = path.join(second.root, 'link'); await fs.symlink(outside, link, 'dir');
+  await ask(second, 'b3', 'edit', { filepath: path.join(link, 'file.txt') });
+  await fs.unlink(link); await fs.symlink(first.root, link, 'dir');
+  await assert.rejects(second.reply({ id: 'b3', allow: true, scope: 'project' }), /ændret/);
+  assert.equal((await b.approvalsPolicy.settings(b.project.root)).rules.length, 0);
+  second.generation++; await assert.rejects(second.reply({ id: 'b1', allow: true }), /ikke længere/);
+  first.running = false; second.running = false;
+});

@@ -50,7 +50,8 @@ async function startControlledServer() {
       id: `write_${stage}`, type: 'function', function: { name: 'write', arguments: JSON.stringify({ filePath: path.join(project, 'public/index.html'), content: controlledHTML(stage === 'rettelse' ? 'Find dit mødelokale' : 'Mødelokaler') }) }
     } : null;
     if (tool) written.add(stage);
-    const chunk = { id: 'controlled', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta: tool ? { role: 'assistant', tool_calls: [{ index: 0, ...tool }] } : { role: 'assistant', content: stage === 'plan' ? 'Plan: Byg de tre mødelokaler i public/index.html med dansk talfilter. Prøv 5, 9 og 99 deltagere. Ingen installation.' : 'Ændringen er skrevet. Prøv filtreringen.' }, finish_reason: null }] };
+    const planText = 'Planen har fire afsnit.\n\nDet bygger vi\nEn dansk side med de tre mødelokaler Birk, Bøg og Ask og et talfelt, der straks filtrerer listen.\n\nSådan skal det se ud\nOverskriften Mødelokaler, en liste over lokalerne og teksten Ingen lokaler passer, når intet matcher.\n\nTeknik og data\nRen HTML, CSS og JavaScript i public. Ingen pakker, server, installation eller netopslag.\n\nDet skal du prøve\nSkriv 5, 9 og 99 i feltet Antal deltagere og kontroller at kun passende lokaler vises.';
+    const chunk = { id: 'controlled', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta: tool ? { role: 'assistant', tool_calls: [{ index: 0, ...tool }] } : { role: 'assistant', content: stage === 'plan' ? planText : 'Ændringen er skrevet. Prøv filtreringen.' }, finish_reason: null }] };
     res.setHeader('content-type', 'text/event-stream');
     res.write('data: ' + JSON.stringify(chunk) + '\n\n');
     res.write('data: ' + JSON.stringify({ ...chunk, choices: [{ index: 0, delta: {}, finish_reason: tool ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 } }) + '\n\n'); res.end('data: [DONE]\n\n');
@@ -133,7 +134,8 @@ async function main() {
     // Fejl fra AI'ens egne projektfiler i forhåndsvisningen (http://127.0.0.1:port) er prøvens emne,
     // ikke appfejl. De fanges i stedet af funktionstjekket på siden. Appens egne fejl (harness://) tæller med.
     page.on('pageerror', e => { if (!/\/\/127\.0\.0\.1:\d+\//.test(String(e.stack || ''))) errors.push(e.message); });
-    await page.waitForFunction(() => !document.querySelector('#welcome-build').disabled);
+    // Knappen kan mangle i det første poll, mens velkomstskærmen endnu er ved at vise sig.
+    await page.waitForFunction(() => document.querySelector('#welcome-build')?.disabled === false);
     await page.exposeFunction('liveDemoEvent', event => {
       if (event.type === 'run.review') reviews.push(event);
       const info = event.properties?.info;

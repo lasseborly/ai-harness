@@ -69,7 +69,7 @@
     $('#plan-notice').textContent = notice; $('#plan-notice').hidden = !notice;
     $('#plan-actions').hidden = !plan || editingPlan; $('#plan-editor').hidden = !editingPlan;
     $('#plan-retired-actions').hidden = Boolean(plan) || !lastPlan || planningNow;
-    $('#plan-build').textContent = plan?.builtAt ? 'Byg igen efter planen' : 'Byg første udkast';
+    $('#plan-build').textContent = plan?.builtAt ? 'Byg igen efter planen' : 'Byg planen';
     $('#plan-restore').hidden = !(plan?.source === 'dig' && plan.previous);
     for (const id of ['#plan-build', '#plan-edit', '#plan-revise', '#plan-restore', '#plan-replan']) $(id).disabled = running;
     $('#plan-status').textContent = planningNow ? 'AI’en arbejder på planen' : plan ? (plan.builtAt ? 'Planen er bygget' : 'Planen er klar til at blive bygget') : lastPlan ? 'Ingen gyldig plan' : 'Ingen plan endnu';

@@ -1,10 +1,10 @@
 // Funktioner, som brugeren selv slår til og fra. Standarden gælder alle projekter, og et projekt kan have undtagelser.
 // Hver funktion har sine skills i det fælles bibliotek. Uden et valg gælder appens anbefalede pakke fra kataloget:
-// alle funktioner undtagen dem med "default": false. Deling og udgivelse kræver ellers udviklerværktøjer og er
-// derfor kun med i pakken, når en komplai Run-adgang er forbundet: så kan Del udgive uden ekstra værktøjer.
+// alle funktioner undtagen dem med "default": false. Udgivelse kræver ellers udviklerværktøjer og er
+// derfor kun med i pakken, når en komplai Run-adgang er forbundet: så kan Udgiv udgive uden ekstra værktøjer.
 const CHOICES = ['alle', 'valgt'];
 
-// En funktion, der bygger på en anden, er kun slået til sammen med den, fx Deling og udgivelse med Versioner og fortryd.
+// En funktion, der bygger på en anden, er kun slået til sammen med den, fx Udgivelse med Versioner og fortryd.
 function resolve(definitions, defaults = {}, exceptions = {}) {
   const on = Object.fromEntries(definitions.map(feature => [feature.id, exceptions[feature.id] ?? defaults[feature.id] ?? feature.default !== false]));
   for (const feature of definitions) if ((feature.requires || []).some(id => !on[id])) on[feature.id] = false;
@@ -21,7 +21,8 @@ function couple(definitions, values) {
 }
 
 function recommended(definitions, state) {
-  const publishing = Boolean(state.hosting?.komplai?.secret);
+  // Et login til udgivelse hos komplai eller Promte gør Udgiv til en anbefalet funktion.
+  const publishing = Boolean(state.hosting?.komplai?.secret) || Object.values(state.hosting?.promte || {}).some(login => login?.secret);
   return publishing ? definitions.map(feature => feature.id === 'deling' ? { ...feature, default: true } : feature) : definitions;
 }
 class Features {

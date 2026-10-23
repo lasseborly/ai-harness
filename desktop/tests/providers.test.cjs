@@ -9,8 +9,9 @@ test('Large 4 bruger Mistrals adapter, kataloggrænser og listepris uden en perm
  for(const id of ['mistral-large-4','mistral-large-4-0']) {
   const model={id,name:'Mistral Large 4'};
   assert.equal(engineProvider(connection,model,'http://127.0.0.1:1/v1','midlertidig').npm,'@ai-sdk/mistral');
-  assert.deepEqual(modelLimits(connection,model),{context:1000000,output:32000});
-  assert.deepEqual(modelLimits(connection,{...model,limits:{context:524288,output:262144}}),{context:524288,output:32000});
+  assert.deepEqual(modelLimits(connection,model),{context:1000000,output:32000,input:200000});
+  // Kataloget har forrang op til Auras højeste svarloft på 128.000, og samtalen komprimeres ved 200.000.
+  assert.deepEqual(modelLimits(connection,{...model,limits:{context:524288,output:262144}}),{context:524288,output:128000,input:200000});
   assert.deepEqual(priceFor(connection,model),{input:1.36,output:4.18,cacheRead:0.14,cacheWrite:1.36});
   const data=disclosure(connection,model);
   assert.match(data.price,/kontrolleret 2026-10-07/);
@@ -56,12 +57,21 @@ for(const kind of ['corti','mistral','alexandra']) test(`${kind}: katalog, strea
 });
 test('kendte modeller får deres dokumenterede tokengrænser; ukendte beholder de forsigtige', () => {
  const { modelLimits } = require('../core/connections.cjs');
- assert.deepEqual(modelLimits({ kind: 'anthropic' }, { id: 'claude-sonnet-5-5' }), { context: 200000, output: 32000 });
+ // Claude 5-familien: 1M kontekst og 128.000 pr. svar ifølge Anthropic. Samtalen komprimeres ved 200.000.
+ assert.deepEqual(modelLimits({ kind: 'anthropic' }, { id: 'claude-sonnet-5-5' }), { context: 1000000, output: 128000, input: 200000 });
+ assert.deepEqual(modelLimits({ kind: 'anthropic' }, { id: 'claude-haiku-4-5' }), { context: 200000, output: 64000 });
+ assert.deepEqual(modelLimits({ kind: 'anthropic' }, { id: 'claude-opus-4-1' }), { context: 200000, output: 32000 });
  assert.deepEqual(modelLimits({ kind: 'anthropic' }, { id: 'claude-3-haiku-20240307' }), { context: 200000, output: 4096 });
- assert.deepEqual(modelLimits({ kind: 'ollama' }, { id: 'qwen3:8b' }), { context: 32768, output: 4096 });
+ assert.deepEqual(modelLimits({ kind: 'openai' }, { id: 'gpt-5.5' }), { context: 400000, output: 128000, input: 200000 });
+ // En lokal Ollama-model må bruge halvdelen af sin kontekst; tænkende qwen3-modeller kunne ellers stoppe ved 4.096.
+ assert.deepEqual(modelLimits({ kind: 'ollama' }, { id: 'qwen3:8b' }), { context: 32768, output: 16384 });
+ // En ukendt tænkende model får plads til både tanker og svar; en ukendt model uden tænkning beholder 4.096.
+ assert.deepEqual(modelLimits({ kind: 'compatible' }, { id: 'ukendt', capabilities: { reasoning: true } }), { context: 32768, output: 16384 });
+ assert.deepEqual(modelLimits({ kind: 'compatible' }, { id: 'ukendt', limits: { context: 200000 }, capabilities: { reasoning: true } }), { context: 200000, output: 32000 });
+ assert.deepEqual(modelLimits({ kind: 'compatible' }, { id: 'ukendt' }), { context: 32768, output: 4096 });
  // Kataloget har forrang, men et svar kan aldrig fylde mere end halvdelen af konteksten.
  assert.deepEqual(modelLimits({ kind: 'compatible' }, { id: 'lille', limits: { context: 8192, output: 8192 } }), { context: 8192, output: 4096 });
- assert.equal(engineProvider({ kind: 'anthropic', name: 'a' }, { id: 'claude-opus-5-5' }, 'http://127.0.0.1:1/v1', 't').models['claude-opus-5-5'].limit.output, 32000);
+ assert.equal(engineProvider({ kind: 'anthropic', name: 'a' }, { id: 'claude-opus-5-5' }, 'http://127.0.0.1:1/v1', 't').models['claude-opus-5-5'].limit.output, 128000);
 });
 test('gatewayen lader en langsom strøm køre færdig, men stopper stilstand', async t => {
  let stall = false;
@@ -96,6 +106,9 @@ test('Corti-forbindelsen bruger adressen fra nøglens miljø og aldrig USA', () 
   const key = environment => Buffer.from(`${environment}:password:testklient:testbruger:hemmelighed`).toString('base64');
   assert.equal(normalize({ kind: 'corti', name: 'Corti', apiKey: key('fr') }).baseURL, 'https://ai.fr.corti.app/v1');
   assert.equal(normalize({ kind: 'corti', name: 'Corti', apiKey: key('eu') }).baseURL, 'https://ai.eu.corti.app/v1');
+  // KL-hackathonens projekter ligger i EU-S (Sovereign); nøglen begynder med "eu-s:".
+  assert.equal(normalize({ kind: 'corti', name: 'Corti', apiKey: key('eu-s') }).baseURL, 'https://ai.eu-s.corti.app/v1');
+  assert.throws(() => normalize({ kind: 'corti', name: 'Corti', apiKey: key('us-x') }), /endnu ikke bruger/);
   assert.equal(normalize({ kind: 'corti', name: 'Corti', apiKey: 'en-nøgle-i-et-andet-format' }).baseURL, 'https://ai.eu.corti.app/v1');
   assert.equal(normalize({ kind: 'corti', name: 'Corti' }).baseURL, 'https://ai.eu.corti.app/v1');
   assert.throws(() => normalize({ kind: 'corti', name: 'Corti', apiKey: key('us') }), /amerikanske miljø/);
@@ -106,6 +119,9 @@ test('Corti-forbindelsen bruger adressen fra nøglens miljø og aldrig USA', () 
   assert.equal(france.source, 'https://docs.corti.ai/authentication/environments_tenants');
   assert.match(france.recipients, /ai\.fr\.corti\.app/);
   assert.doesNotMatch(disclosure({ kind: 'corti', name: 'Corti', baseURL: 'https://ai.eu.corti.app/v1' }, { id: 'corti-s1' }).regionShort, /Paris/);
+  const sovereign = disclosure({ kind: 'corti', name: 'Corti', baseURL: 'https://ai.eu-s.corti.app/v1' }, { id: 'corti-s1' });
+  assert.match(sovereign.regionShort, /EU-S \(Sovereign\), hos Scaleway i Frankrig/);
+  assert.match(sovereign.recipients, /ai\.eu-s\.corti\.app/);
 });
 
 test('Alexandra: DKK-priser, dokumenterede grænser og danske vilkår', () => {
@@ -113,8 +129,8 @@ test('Alexandra: DKK-priser, dokumenterede grænser og danske vilkår', () => {
   const connection = normalize({ kind: 'alexandra', name: 'Min Alexandra' });
   assert.equal(engineProvider(connection, { id: 'glm-5.3-flash' }, 'http://127.0.0.1:1/v1', 'midlertidig').npm, '@ai-sdk/openai-compatible');
   // Modelkortet oplyser kontekstvinduerne; svargrænsen er platformens eget tal fra vejledningen til kodeagenter.
-  assert.deepEqual(modelLimits(connection, { id: 'glm-5.3-flash' }), { context: 1048576, output: 16384 });
-  assert.deepEqual(modelLimits(connection, { id: 'qwen3.8-flash-next' }), { context: 262144, output: 16384 });
+  assert.deepEqual(modelLimits(connection, { id: 'glm-5.3-flash' }), { context: 1048576, output: 16384, input: 200000 });
+  assert.deepEqual(modelLimits(connection, { id: 'qwen3.8-flash-next' }), { context: 262144, output: 16384, input: 200000 });
   assert.deepEqual(priceFor(connection, { id: 'glm-5.3-flash' }), { currency: 'DKK', input: 6, output: 30, cacheRead: 3, cacheWrite: 6 });
   assert.deepEqual(priceFor(connection, { id: 'qwen3.8-flash-next' }), { currency: 'DKK', input: 1, output: 5, cacheRead: 0.2, cacheWrite: 1 });
   assert.equal(priceFor(connection, { id: 'ukendt-model' }), null, 'en ukendt model får ingen opdigtet pris');
@@ -140,4 +156,42 @@ test('når Corti afviser nøglen, siger beskeden hvilken adresse appen prøvede'
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => server.close());
   await assert.rejects(requestJSON(`http://127.0.0.1:${server.address().port}/v1/models`, { key: 'afvist', kind: 'corti' }), /Corti afviste nøglen på adressen i EU\. Brug en nøgle fra Corti Models/);
   await assert.rejects(requestJSON(`http://127.0.0.1:${server.address().port}/v1/models`, { key: 'afvist', kind: 'mistral' }), /Serveren afviste adgangen/);
+});
+
+test('corti-s1 får plads til tanker og svar, og kun de indsatsniveauer, Corti selv oplyser', () => {
+  const { modelLimits, effortLevels, reasons } = require('../core/connections.cjs');
+  const corti = { kind: 'corti' };
+  // Cortis katalog: 1M kontekst, tænkning og indsatsniveauerne low, high og max, men intet svarloft.
+  const s1 = { id: 'corti-s1', limits: { context: 1048576, output: null }, capabilities: { reasoning: true, effort: ['low', 'high', 'max'] } };
+  assert.deepEqual(modelLimits(corti, s1), { context: 1048576, output: 128000, input: 200000 });
+  assert.equal(reasons(corti, s1), true);
+  assert.deepEqual(effortLevels(corti, s1), ['low', 'high', 'max']);
+  assert.deepEqual(effortLevels(corti, { id: 'corti-s1-instant', capabilities: { reasoning: false, effort: [] } }), []);
+  // Claude-modeller tager imod indsatsen low; ældre modeller uden indsats får ingen.
+  assert.ok(effortLevels({ kind: 'anthropic' }, { id: 'claude-opus-5-5' }).includes('low'));
+  assert.deepEqual(effortLevels({ kind: 'anthropic' }, { id: 'claude-haiku-4-5' }), []);
+  assert.deepEqual(effortLevels({ kind: 'mistral' }, { id: 'mistral-large-4' }), []);
+});
+test('OpenCode får Auras højeste svarloft, så modellens egen grænse bestemmer', () => {
+  const { isolatedEnv } = require('../core/engine.cjs');
+  const { OUTPUT_CEILING } = require('../core/connections.cjs');
+  assert.equal(isolatedEnv(require('node:os').tmpdir(), {}, 'adgangskode').OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX, String(OUTPUT_CEILING));
+  assert.equal(OUTPUT_CEILING, 128000);
+});
+test('gatewayen sender kun en indsats, når brugeren har valgt den, og som hver udbyder forventer', async t => {
+  const received = [];
+  const server = require('node:http').createServer(async (req, res) => { let raw = ''; for await (const c of req) raw += c; received.push({ url: req.url, body: JSON.parse(raw) }); res.setHeader('content-type', 'application/json'); res.end('{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}'); });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const send = async (connection, model, effort, path) => {
+    const gateway = await startGateway(connection, model, 'nøgle', null, () => {}, { effort });
+    t.after(() => gateway.close());
+    await fetch(gateway.url.replace(/\/v1$/, '') + path, { method: 'POST', headers: { authorization: 'Bearer ' + gateway.token, 'content-type': 'application/json' }, body: JSON.stringify({ model: model.id, messages: [] }) });
+    return received.at(-1).body;
+  };
+  const corti = { kind: 'corti', name: 'Corti', baseURL: base, id: 'c' };
+  assert.equal((await send(corti, { id: 'corti-s1' }, null, '/v1/chat/completions')).reasoning_effort, undefined, 'ingen indsats uden brugerens valg');
+  assert.equal((await send(corti, { id: 'corti-s1' }, 'low', '/v1/chat/completions')).reasoning_effort, 'low');
+  const anthropic = { kind: 'anthropic', name: 'Claude', baseURL: base, id: 'a' };
+  assert.deepEqual((await send(anthropic, { id: 'claude-opus-5-5' }, 'low', '/v1/messages')).output_config, { effort: 'low' });
 });

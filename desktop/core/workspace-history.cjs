@@ -10,7 +10,7 @@ const { randomUUID } = require('node:crypto');
 // Ældre projekter havde én samtale i projektfilen og arkiverede samtaler i <projekt>-archives. De flyttes til
 // samtalefiler første gang projektet åbnes; arkivfilerne bevares uændret.
 const now = () => new Date().toISOString();
-const emptyChat = (id, title = '') => ({ version: 1, id, title, renamed: false, draft: '', mode: 'chat', messages: [], plan: null, planConversation: [], lastPlan: null, status: 'idle', usage: null, createdAt: now(), updatedAt: now() });
+const emptyChat = (id, title = '') => ({ version: 1, id, title, renamed: false, archived: false, draft: '', mode: 'chat', messages: [], plan: null, planConversation: [], lastPlan: null, status: 'idle', usage: null, createdAt: now(), updatedAt: now() });
 const emptyProject = () => ({ version: 2, brief: null, chats: [], active: null, restorationID: null });
 const idPattern = /^[0-9a-f-]{36}$/;
 const damaged = 'Oversigten over projektets samtaler kan ikke læses. Projektfilerne er ikke berørt, og filen er bevaret. Start en ny samtale med + for at fortsætte.';
@@ -23,7 +23,7 @@ function titleFrom(messages) {
 }
 // Oversigten i projektfilen, så sidepanelet kan vise samtalerne uden at læse dem alle.
 // En samtale uden beskeder hedder det, brugeren er begyndt at skrive.
-const summary = chat => ({ id: chat.id, title: chat.title || titleFrom(chat.messages) || titleFrom([{ role: 'user', text: chat.draft || '' }]), renamed: Boolean(chat.renamed), createdAt: chat.createdAt, updatedAt: chat.updatedAt, status: chat.status, count: chat.messages.length, draft: Boolean(chat.draft), copy: chat.copy || null });
+const summary = chat => ({ id: chat.id, title: chat.title || titleFrom(chat.messages) || titleFrom([{ role: 'user', text: chat.draft || '' }]), renamed: Boolean(chat.renamed), archived: Boolean(chat.archived), createdAt: chat.createdAt, updatedAt: chat.updatedAt, status: chat.status, count: chat.messages.length, draft: Boolean(chat.draft), copy: chat.copy || null });
 function validChat(data) {
   return data && data.version === 1 && idPattern.test(data.id) && Array.isArray(data.messages) && Array.isArray(data.planConversation) && typeof data.draft === 'string';
 }
@@ -106,10 +106,11 @@ class WorkspaceHistory {
   async open(project) {
     const data = await this.serial(async () => {
       const value = await this.project(project.root);
-      if (!value.chats.length || !value.chats.some(item => item.id === value.active)) {
-        const chat = value.chats.at(-1) ? null : emptyChat(randomUUID());
+      const visible = value.chats.filter(item => !item.archived);
+      if (!visible.some(item => item.id === value.active)) {
+        const chat = visible.length ? null : emptyChat(randomUUID());
         if (chat) { await this.write(this.chatFile(project.root, chat.id), chat); value.chats.push(summary(chat)); }
-        value.active = chat?.id || [...value.chats].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0].id;
+        value.active = chat?.id || visible.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0].id;
         value.updatedAt = now(); await this.write(this.file(project.root), value);
       }
       return value;
@@ -132,7 +133,7 @@ class WorkspaceHistory {
     return this.serial(async () => {
       let project;
       try { project = await this.project(root); } catch (error) { if (error.message !== damaged) throw error; project = await this.recover(root); }
-      const empty = project.chats.find(item => !item.count && !item.draft);
+      const empty = project.chats.find(item => !item.archived && !item.count && !item.draft);
       const chat = empty ? await this.readChat(root, empty.id) : emptyChat(randomUUID());
       if (!empty) await this.write(this.chatFile(root, chat.id), chat);
       project.chats = [...project.chats.filter(item => item.id !== chat.id), summary(chat)]; project.active = chat.id;
@@ -144,6 +145,17 @@ class WorkspaceHistory {
     if (typeof title !== 'string' || /[\r\n\0]/.test(title) || title.trim().length > 80) throw new Error('Skriv et navn på én linje og højst 80 tegn.');
     return this.updateChat(root, id, chat => { chat.title = title.trim(); chat.renamed = Boolean(title.trim()); });
   }
+  archiveChat(root, id, archived = true) {
+    return this.serial(async () => {
+      const project = await this.project(root), chat = await this.readChat(root, id);
+      if (chat.status === 'working') throw new Error('Vent, til opgaven er færdig, før du arkiverer samtalen.');
+      chat.archived = archived; chat.updatedAt = now();
+      await this.write(this.chatFile(root, id), chat);
+      project.chats = [...project.chats.filter(item => item.id !== id), summary(chat)];
+      if (archived && project.active === id) project.active = project.chats.filter(item => !item.archived).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]?.id || null;
+      project.updatedAt = chat.updatedAt; await this.write(this.file(root), project); return chat;
+    });
+  }
   // Sletning flytter filen med remove, fx til papirkurven; samtalen fjernes fra projektets oversigt.
   removeChat(root, id, remove = file => fs.rm(file, { force: true })) {
     return this.serial(async () => {
@@ -151,7 +163,7 @@ class WorkspaceHistory {
       if (!project.chats.some(item => item.id === id)) throw new Error('Samtalen findes ikke længere.');
       await remove(this.chatFile(root, id));
       project.chats = project.chats.filter(item => item.id !== id);
-      if (project.active === id) project.active = [...project.chats].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]?.id || null;
+      if (project.active === id) project.active = project.chats.filter(item => !item.archived).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]?.id || null;
       project.updatedAt = now(); await this.write(this.file(root), project);
       return project;
     });
@@ -159,10 +171,11 @@ class WorkspaceHistory {
   // Samtalerne i et projekt, nyeste først. Tomme samtaler vises ikke, medmindre de er den aktive.
   async chats(root) {
     const project = await this.project(root);
-    return [...project.chats].filter(item => item.count || item.draft || item.id === project.active).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return [...project.chats].filter(item => item.archived || item.count || item.draft || item.id === project.active).map(item => ({ ...item, archived: Boolean(item.archived) })).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
+  // Alle projekter, appen har åbnet, senest åbnet først. Sidepanelet viser de første og resten bag "Vis alle".
   async recent() {
-    return Object.entries((await this.store.read()).projects).filter(([, p]) => p.recent).map(([id, p]) => ({ id, ...p.recent })).sort((a,b) => b.at.localeCompare(a.at)).slice(0, 12);
+    return Object.entries((await this.store.read()).projects).filter(([, p]) => p.recent).map(([id, p]) => ({ id, ...p.recent })).sort((a,b) => b.at.localeCompare(a.at));
   }
   draft(root, id, input) {
     if (typeof input.text !== 'string' || input.text.length > 30000 || !['chat','plan','build','free'].includes(input.mode)) throw new Error('Ugyldig kladde.');
@@ -183,7 +196,7 @@ class WorkspaceHistory {
       while (data.messages.length > 200 || size > 200000) { size -= data.messages.shift().text.length; data.trimmed = true; }
       data.plan = run.plan; data.planConversation = run.planConversation;
       if (run.lastPlan !== undefined) data.lastPlan = run.lastPlan;
-      data.status = run.status; data.mode = run.mode;
+      data.status = run.status; data.mode = run.mode; data.lastRunMode = run.mode;
       if (run.usage && typeof run.usage === 'object') data.usage = run.usage;
       if (run.clearDraft) data.draft = '';
     });

@@ -19,7 +19,7 @@ const helpers = require('./ui-test-helpers.cjs');
   console.log('Testmateriale: ' + root);
   let installed = path.join(programs, path.basename(oldBundle));
   await fs.mkdir(programs);
-  let app, page, requests = 0, downloadCount = 0, updateInfo;
+  let app, page, requests = 0, downloadCount = 0, updateInfo, usesBundledController = false;
   const key = 'SYNTHETISK_TESTNOEGLE_KUN_LOKALT';
   const server = http.createServer((req, res) => {
     if (nativeZIP && req.url === '/feed') { res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify(updateInfo)); }
@@ -32,6 +32,7 @@ const helpers = require('./ui-test-helpers.cjs');
   const bundleVersion = bundle => execFileSync('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', path.join(bundle, 'Contents/Info.plist')], { encoding: 'utf8' }).trim();
   async function launch() {
     app = await electron.launch({ executablePath: path.join(installed, 'Contents/MacOS', path.basename(installed, '.app')), args: ['--user-data-dir=' + data], env: { ...process.env, PATH: '/usr/bin:/bin:/usr/sbin:/sbin', ELECTRON_RUN_AS_NODE: undefined } });
+    await helpers.forbidGitWrites(app);
     await helpers.isolateDocuments(app, path.join(root, 'Dokumenter'));
     page = await app.firstWindow(); await helpers.skipIntroduction(page);
     // Prøven må kun kontakte sin egen server, heller ikke ved den nye versions automatiske kontrol.
@@ -42,10 +43,12 @@ const helpers = require('./ui-test-helpers.cjs');
     execFileSync('/bin/cp', ['-cR', oldBundle, installed]); await launch();
     const oldVersion = await app.evaluate(({ app }) => app.getVersion()), targetVersion = bundleVersion(newBundle);
     console.log('Tidligere version startet: ' + oldVersion);
-    await page.fill('#name', 'Bevaret projekt'); await page.fill('#purpose', 'Syntetisk prøve af opdatering'); await page.click('#create'); await page.waitForSelector('#workspace:not([hidden])');
-    const project = await page.locator('#project-path').textContent();
+    const project = path.join(root, 'Bevaret projekt');
+    await fs.mkdir(path.join(project, 'public'), { recursive: true });
     const original = '<!doctype html><html lang="da"><meta charset="utf-8"><title>Opgraderingsprøve</title><h1>Bevaret indhold</h1></html>';
     await fs.writeFile(path.join(project, 'public/index.html'), original);
+    await helpers.openExistingProject(app, page, project);
+    await assert.rejects(fs.access(path.join(project, '.git')), { code: 'ENOENT' });
     await page.frameLocator('#preview').getByRole('heading', { name: 'Bevaret indhold' }).waitFor();
     let id;
     if (!installationOnly) {
@@ -58,12 +61,27 @@ const helpers = require('./ui-test-helpers.cjs');
     await page.fill('#prompt', 'Bevar kladden gennem opdatering');
     await page.evaluate(async () => { await saveChatDraft(true); });
     console.log(installationOnly ? 'Projekt, kladde og design er gemt. Særskilt installationsprøve uden nøglelagring.' : 'Projekt, forbindelse, kladde og design er gemt. Udskifter testappen.');
+    await helpers.assertNoGitWrites(app);
     if (nativeZIP) {
+      const nativeController = await app.evaluate(({ app }) => {
+        const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
+        const modulePath = app.getAppPath() + '/core/updates.cjs';
+        if (!require('node:fs').existsSync(modulePath)) return false;
+        const { Updates } = require(modulePath), original = Updates.prototype.snapshot;
+        Updates.prototype.snapshot = function () { global.nativeTest = this; Updates.prototype.snapshot = original; return original.call(this); };
+        return true;
+      });
+      usesBundledController = nativeController;
+      if (nativeController) {
+        assert.equal((await page.evaluate(() => window.harness.updatesState())).ok, true);
+        assert.equal(await app.evaluate(() => global.nativeTest?.version), oldVersion, 'Prøven bruger den tidligere pakkes egen opdateringscontroller.');
+      }
       const hash = createHash('sha512'); for await (const chunk of createReadStream(nativeZIP)) hash.update(chunk);
       updateInfo = { version: targetVersion, files: [{ url: `https://github.com/ai-alliancen-org/ai-harness/releases/download/v${targetVersion}/Aura-${targetVersion}-mac-${process.arch}.zip`, sha512: hash.digest('base64'), size: (await fs.stat(nativeZIP)).size }] };
-      // Beta.6 har ingen opdateringsklient. Kun denne testprocess får den nye klient indlæst udefra.
-      // Begge appbundter forbliver signerede og uændrede; Squirrel står for selve installationen.
-      await app.evaluate(async ({ app, session }, { source, root, serverURL }) => {
+      // Brug den gamle apps egen klient. Kun apps fra før updateren blev indført
+      // får den nye klient indlæst i testprocessen. Bundterne ændres aldrig.
+      await app.evaluate(async ({ app, session }, { fallbackSource, root, serverURL, nativeController }) => {
+        const source = nativeController ? app.getAppPath() : fallbackSource;
         const require = process.getBuiltinModule('module').createRequire(source + '/package.json');
         const { MacUpdater } = require(source + '/node_modules/electron-updater');
         const { DownloadedUpdateHelper } = require(source + '/node_modules/electron-updater/out/DownloadedUpdateHelper');
@@ -77,7 +95,12 @@ const helpers = require('./ui-test-helpers.cjs');
           if (request.url.startsWith('https://github.com/ai-alliancen-org/ai-harness/releases/download/')) return callback({ redirectURL: serverURL + '/update.zip' });
           callback({ cancel: !request.url.startsWith(serverURL + '/') });
         });
-        global.nativeTest = new Updates({ updater, store: { read: async () => ({}), update: async () => {} }, version: app.getVersion() });
+        if (nativeController) {
+          global.nativeTest.close();
+          global.nativeTest.connect(updater);
+          global.nativeTest.set({ phase: 'idle', error: '' });
+          global.nativeTest.install = () => updater.quitAndInstall(false, false);
+        } else global.nativeTest = new Updates({ updater, store: { read: async () => ({}), update: async () => {} }, version: app.getVersion() });
         const record = (event, detail = '') => require('node:fs').appendFileSync(root + '/native-events.jsonl', JSON.stringify({ at: new Date().toISOString(), event, detail }) + '\n');
         global.recordNativeEvent = record;
         for (const event of ['checking-for-update', 'update-available', 'update-not-available', 'update-downloaded']) updater.nativeUpdater.on(event, () => record(event));
@@ -90,7 +113,7 @@ const helpers = require('./ui-test-helpers.cjs');
         const state = await global.nativeTest.check(); if (state.phase !== 'available') throw new Error(JSON.stringify(state));
         const ready = await global.nativeTest.download(); if (ready.phase !== 'ready') throw new Error(JSON.stringify(ready));
         record('download-ready');
-      }, { source: path.resolve(__dirname, '..'), root, serverURL });
+      }, { fallbackSource: path.resolve(__dirname, '..'), root, serverURL, nativeController });
       assert.equal(downloadCount, 1);
       console.log('Den signerede ZIP er hentet. Starter native installation.');
       // Squirrel henter hele arkivet gennem sin lokale proxy og kontrollerer signaturen, før appen lukkes.
@@ -116,6 +139,7 @@ const helpers = require('./ui-test-helpers.cjs');
     }
     await launch();
     const newVersion = await app.evaluate(({ app }) => app.getVersion()); assert.equal(newVersion, targetVersion); assert.notEqual(newVersion, oldVersion);
+    await helpers.assertNoGitWrites(app);
     assert.equal(requests, installationOnly ? 0 : 1, 'Opdatering må ikke selv sende til en forbindelse');
     if (!installationOnly) {
       const state = await page.evaluate(() => window.harness.connectionState()); assert.ok(state.value.connections.some(c => c.id === id)); assert.equal(JSON.stringify(state).includes(key), false);
@@ -127,7 +151,9 @@ const helpers = require('./ui-test-helpers.cjs');
     assert.equal(await page.inputValue('#prompt'), 'Bevar kladden gennem opdatering');
     assert.ok((await page.evaluate(() => window.harness.listDesigns())).value.some(d => d.name === 'Bevaret design'));
     await page.screenshot({ path: path.join(root, 'opdateret.png'), animations: 'disabled' });
-    const result = { status: 'bestået', root, oldVersion, newVersion, native: Boolean(nativeZIP), installationOnly, checks: [nativeZIP ? 'Squirrel.Mac installerede signeret ZIP' : 'manuel udskiftning af app samme sted', 'uændrede projektfiler', ...(!installationOnly ? ['forbindelse og krypteret testnøgle bevaret'] : []), 'ingen automatisk modelsendelse', 'designpakke og kladde bevaret'], limitation: 'Mac med isolerede brugerdata. Native prøve indlæser klienten i beta.6 udefra og dækker Squirrel-installation samt kontrolleret manuel genåbning; automatisk genstart er ikke afprøvet. Almindelige beta.6-brugere skal opgradere manuelt. Windows kræver egen prøve.' + (installationOnly ? ' Denne særskilte prøve dækker ikke nøglelagring eller bevarelse af forbindelse.' : '') };
+    await helpers.assertNoGitWrites(app);
+    await assert.rejects(fs.access(path.join(project, '.git')), { code: 'ENOENT' });
+    const result = { status: 'bestået', root, oldVersion, newVersion, native: Boolean(nativeZIP), usesBundledController, installationOnly, checks: [nativeZIP ? 'Squirrel.Mac installerede signeret ZIP' : 'manuel udskiftning af app samme sted', ...(usesBundledController ? ['den tidligere pakkes egen opdateringscontroller'] : []), 'uændrede projektfiler', ...(!installationOnly ? ['forbindelse og krypteret testnøgle bevaret'] : []), 'ingen automatisk modelsendelse', 'designpakke og kladde bevaret', 'ingen Git-skrivninger'], limitation: 'Mac med isolerede brugerdata og kontrolleret manuel genåbning; automatisk genstart er ikke afprøvet. Windows kræver egen prøve.' + (nativeZIP && !usesBundledController ? ' Den gamle app har ingen updater; klienten indlæses kun i testprocessen. Almindelige brugere af den version skal opgradere manuelt.' : '') + (installationOnly ? ' Denne særskilte prøve dækker ikke nøglelagring eller bevarelse af forbindelse.' : '') };
     await fs.writeFile(path.join(root, 'rapport.json'), JSON.stringify(result, null, 2)); console.log(JSON.stringify(result));
   } catch (error) {
     await page?.screenshot({ path: path.join(root, 'fejl.png'), timeout: 3000 }).catch(() => {});

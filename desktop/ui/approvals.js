@@ -7,6 +7,10 @@
   function target(p) {
     const file = typeof p.metadata?.filepath === 'string' ? p.metadata.filepath : '';
     const root = p.workspaceRoot || current?.workspaceRoot || current?.root || '';
+    if (p.policy?.match?.targets) {
+      if (p.policy.projectFile && file && root) return { projectFile: true, text: file.slice(root.length + 1).replaceAll('\\', '/') };
+      return { projectFile: false, text: p.policy.target };
+    }
     if (p.permission === 'edit' && file && root && (file.startsWith(root + '/') || file.startsWith(root + '\\'))) return { projectFile: true, text: file.slice(root.length + 1).replaceAll('\\', '/') };
     if (p.permission === 'bash') return { text: p.toolInput?.command || p.metadata?.command || (p.patterns || []).join('\n') };
     if (p.permission === 'webfetch') return { text: p.metadata?.url || p.toolInput?.url || (p.patterns || []).join('\n') };
@@ -35,14 +39,49 @@
     if (diff.rows.length > 400) box.append(node('div', 'Ændringen er lang. Resten ses under Ændringer, når den er gemt.', 'diff-gap'));
     return box;
   }
-  const record = (v, text) => v.log.append(node('p', text, 'chat-message answer-record'));
+  const pending = new WeakMap(), receipts = new WeakMap();
+  const groups = v => { if (!pending.has(v)) pending.set(v, new Map()); return pending.get(v); };
+  function record(v, key, data) {
+    let state = receipts.get(v);
+    if (!state || state.run !== v.runStartedAt) { state = { run: v.runStartedAt, records: new Map() }; receipts.set(v, state); }
+    let entry = state.records.get(key);
+    if (!entry || !entry.element.parentNode) { entry = { count: 0, element: node('p', '', 'chat-message answer-record') }; state.records.set(key, entry); v.log.append(entry.element); }
+    entry.count += data.count || 1; entry.element.textContent = view.receiptText({ ...data, count: entry.count });
+  }
+  function removeRequest(v, id) {
+    for (const [key, group] of groups(v)) if (group.requests.delete(id)) {
+      doneWaiting(id, v);
+      if (!group.requests.size) { group.box.remove(); groups(v).delete(key); }
+      else {
+        // En besvaret fil må ikke blive stående som målet for de resterende valg.
+        const remaining = [...group.requests.values()]; group.box.remove(); groups(v).delete(key);
+        for (const request of remaining) show(request, v);
+      }
+    }
+  }
   // v er samtalens visning. Kortet står i den samtale, hvis AI spurgte, også når en anden samtale er åben.
   function show(p, v = viewFor()) {
+    const key = view.groupKey(p), existing = groups(v).get(key);
+    if (existing && existing.box.parentNode) {
+      if (existing.requests.has(p.id)) return;
+      existing.requests.set(p.id, p); existing.count.hidden = false;
+      existing.count.textContent = `${existing.requests.size} forespørgsler om samme adgang`;
+      const fold = node('details', undefined, 'approval-fold');
+      const location = target(p).text;
+      fold.append(node('summary', location || 'Se den næste handling'));
+      if (p.permission === 'edit' && typeof p.metadata?.diff === 'string') fold.append(diffRows(view.parseUnifiedDiff(p.metadata.diff)));
+      else fold.append(node('pre', location));
+      existing.items.append(fold);
+      waitFor(p.id, existing.title, existing.box, v); return;
+    }
     const where = target(p), explanationText = explanation(p, where);
     const title = p.isolated && where.projectFile ? 'Må AI’en ændre filer i samtalens kopi?' : explanationText.title;
     const effect = p.isolated && where.projectFile ? 'Kun kopien ændres. Du gennemgår ændringerne, før de flettes ind i projektet.' : explanationText.effect;
     const box = node('section', undefined, 'approval'); box.dataset.id = p.id;
     box.append(node('p', `Godkendelse · ${kinds[p.permission] || 'Handling'}`, 'approval-kind'), node('strong', title, 'approval-title'));
+    const count = node('p', '', 'hint'), items = node('div'); count.hidden = true;
+    const group = { box, count, items, title, requests: new Map([[p.id, p]]), busy: false }; groups(v).set(key, group);
+    box.append(count);
     const facts = node('dl', undefined, 'approval-facts');
     const fact = (label, ...content) => { const dd = node('dd'); dd.append(...content); facts.append(node('dt', label), dd); return dd; };
     // Hvad: den konkrete fil, kommando eller adresse og omfanget af ændringen.
@@ -64,41 +103,74 @@
       const guesses = view.commandHints(where.text);
       if (guesses.length) { const list = node('ul', undefined, 'approval-hints'); for (const guess of guesses) list.append(node('li', guess)); const note = node('span', 'Et gæt ud fra kommandoens tekst, ikke en kontrol.', 'hint'); note.append(info('gættet', 'Kommandoer kan ændre eller slette filer, installere programmer og kontakte andre tjenester med dine rettigheder. Aura læser kun kommandoens tekst og kan ikke se, hvad den faktisk gør.')); effectDd.append(list, note); }
     }
-    box.append(facts);
+    box.append(facts, items);
     if (diff && (diff.added || diff.removed)) { const fold = node('details', undefined, 'approval-fold'); fold.append(node('summary', 'Se ændringen'), diffRows(diff)); box.append(fold); }
     const technical = node('details', undefined, 'approval-fold'); technical.append(node('summary', 'Tekniske detaljer'), node('pre', JSON.stringify({ tilladelse: p.permission, mønstre: p.patterns, detaljer: { ...p.metadata, ...(p.metadata?.diff ? { diff: '(se ændringen ovenfor)' } : {}) } }, null, 2))); box.append(technical);
-    // Filændringer i projektet kan tillades for resten af opgaven. Alt andet spørger hver gang.
-    const choices = where.projectFile ? [['Afvis', false], ['Kun denne fil', true], ['Tillad for denne opgave', true, 'task']] : [['Afvis', false], ['Tillad én gang', true]];
+    const projectFile = p.policy?.projectFile === true;
+    const choices = [['Tillad én gang', true], ...(p.policy?.persistable ? [['Tillad altid i projektet', true, 'project']] : []), ['Afvis', false]];
     const row = node('div', undefined, 'approval-actions');
     // Handlingen i almindeligt dansk til linjen i samtalen, fx "ændre filer i projektet: public/index.html".
     const label = `${title.replace(/\?$/, '').replace(/^Må AI’en /, '')}${where.text ? `: ${where.text.split('\n')[0].slice(0, 120)}` : ''}`;
-    const reply = (allow, scope, message) => action(async () => {
-      await call('reply', { id: p.id, allow, scope, chat: v.id, ...(message ? { message } : {}) });
-      box.remove(); doneWaiting(p.id, v);
+    const reply = (allow, scope, message, folder) => action(async () => {
+      if (group.busy || !group.requests.size) return;
+      group.busy = true;
+      const ids = [...group.requests.keys()];
+      for (const button of box.querySelectorAll('button')) button.disabled = true;
+      try { await call('reply', { id: ids[0], ids, allow, scope, chat: v.id, ...(message ? { message } : {}), ...(folder ? { folder } : {}) }, { root: v.root || current?.root, chat: v.id }); }
+      catch (error) { let feedback = box.querySelector('.approval-feedback'); if (!feedback) { feedback = node('p', '', 'approval-feedback'); feedback.setAttribute('role', 'status'); box.append(feedback); } feedback.textContent = error.message; return; }
+      finally { group.busy = false; for (const button of box.querySelectorAll('button')) button.disabled = false; }
+      for (const id of ids) removeRequest(v, id);
       if (!allow && !message) { v.rejectedThisRun = true; v.lastRejection = { title, target: where.text }; }
-      record(v, !allow ? (message ? `Du afviste, at AI’en må ${label}, og skrev: ${message}` : `Du afviste, at AI’en må ${label}. AI’en stopper.`) : scope ? 'Du gav AI’en lov til at ændre filer i projektet resten af opgaven.' : `Du gav AI’en lov til at ${label}.`);
+      record(v, `${allow}:${scope || 'once'}:${key}:${message || ''}`, { count: ids.length, label: folder || p.policy?.label || label, allow, scope, message });
       setStatusDetail(!allow ? (message ? 'AI’en har fået din besked og fortsætter …' : 'Handlingen er afvist. AI’en stopper.') : 'Godkendelsen er sendt. AI’en fortsætter …', v);
     });
-    for (const [text, allow, scope] of choices) { const button = node('button', text, scope ? 'primary' : undefined); button.type = 'button'; button.onclick = () => reply(allow, scope); row.append(button); }
+    for (const [text, allow, scope] of choices) { const button = node('button', text); button.type = 'button'; button.onclick = () => reply(allow, scope); row.append(button); }
     box.append(row);
-    if (where.projectFile) { const scope = node('p', 'Tillad for denne opgave gælder kun filer i projektmappen, til opgaven slutter.', 'hint approval-scope'); scope.append(info('omfanget', 'Kommandoer, hjemmesider og filer uden for projektet spørger stadig hver gang. Tilladelsen ophører, når opgaven slutter eller stoppes.')); box.append(scope); }
+    if (p.policy?.persistable) box.append(node('p', projectFile ? 'En gemt tilladelse gælder projektets filer. Du kan slå den fra under Projektets tilladelser.' : `En gemt tilladelse gælder ${p.permission === 'bash' ? 'den viste kommando i den samme mappe' : p.permission === 'webfetch' ? 'den viste hjemmeside' : 'den viste adgang'}. Du kan fjerne den under Projektets tilladelser.`, 'hint approval-scope'));
+    const extra = node('div'); extra.hidden = true;
+    const more = node('button', 'Flere valg', 'text-button'); more.type = 'button';
+    more.onclick = () => { row.hidden = true; more.hidden = true; extra.hidden = false; };
+    const back = node('button', 'Tilbage', 'text-button'); back.type = 'button'; back.onclick = () => { extra.hidden = true; row.hidden = false; more.hidden = false; };
+    if (projectFile) { const task = node('button', 'Tillad for denne opgave'); task.type = 'button'; task.onclick = () => reply(true, 'task'); extra.append(task); }
+    if (p.policy?.folder && p.policy.persistable && !projectFile) {
+      const folderButton = node('button', 'Tillad en mappe fremover'); folderButton.type = 'button';
+      folderButton.onclick = () => {
+        extra.hidden = true;
+        const form = node('form', undefined, 'approval-folder');
+        const heading = node('strong', 'Hvilken mappe må AI’en bruge?'), input = node('input'); input.value = p.policy.folder; input.setAttribute('aria-label', 'Mappe'); input.required = true;
+        const notice = node('p', `${p.permission === 'edit' ? 'Filændringer' : 'Denne type filadgang'} tillades i mappen og dens undermapper. Tilladelsen gemmes kun i dette projekt.`, 'hint');
+        const parent = node('button', 'Vælg overordnet mappe'); parent.type = 'button'; parent.onclick = () => { const value = input.value.replace(/[\\/]+$/, ''); const cut = Math.max(value.lastIndexOf('/'), value.lastIndexOf('\\')); if (cut > 0) input.value = value.slice(0, cut); };
+        const allow = node('button', 'Tillad mappen', 'primary'); allow.type = 'submit';
+        const cancel = node('button', 'Tilbage'); cancel.type = 'button'; cancel.onclick = () => { form.remove(); extra.hidden = false; };
+        form.append(heading, input, notice, parent, allow, cancel);
+        form.onsubmit = event => { event.preventDefault(); reply(true, 'project', undefined, input.value.trim()); };
+        box.append(form); input.focus();
+      };
+      extra.append(folderButton);
+    }
     // Afvis med en besked: AI'en får beskeden og fortsætter i stedet for at stoppe.
     const other = node('button', 'Afvis med en besked', 'text-button approval-message-link'); other.type = 'button';
     other.onclick = () => {
-      other.hidden = true;
+      extra.hidden = true;
       const form = node('form', undefined, 'approval-message'); const id = `afvis-${p.id}`;
       const text = node('label', 'Hvad skal AI’en gøre i stedet?'); text.htmlFor = id;
       const input = node('textarea'); input.id = id; input.rows = 2; input.maxLength = 2000; input.required = true; input.placeholder = 'Fx Brug ikke en ny pakke. Skriv det i almindelig JavaScript.';
       const send = node('button', 'Afvis og send beskeden', 'primary'); send.type = 'submit';
       form.append(text, input, send); form.onsubmit = event => { event.preventDefault(); if (input.value.trim()) reply(false, undefined, input.value.trim()); };
+      const cancel = node('button', 'Tilbage'); cancel.type = 'button'; cancel.onclick = () => { form.remove(); extra.hidden = false; }; form.append(cancel);
       box.append(form); input.focus();
     };
-    box.append(other);
+    extra.append(other, back); box.append(more, extra);
     v.approvals.append(box); if (v === viewFor()) box.scrollIntoView({ block: 'nearest' });
     waitFor(p.id, title, box, v);
   }
   window.harness.onEvent(event => {
-    if (event.type === 'permission.replied') { const v = viewFor(event.chat), box = [...v.approvals.children].find(item => item.dataset.id === event.properties?.requestID); if (box) { box.remove(); doneWaiting(event.properties.requestID, v); } }
+    if (event.type === 'permission.replied') removeRequest(viewFor(event.chat), event.properties?.requestID);
+    if (event.type === 'permission.auto') {
+      const v = viewFor(event.chat), policy = event.policy;
+      record(v, `auto:${policy?.key || event.file || 'projekt'}`, { automatic: true, label: policy?.projectFile ? 'projektets filer' : policy?.label || event.file || 'projektets filer' });
+    }
+    if (event.type === 'run.status' && !['starting', 'working'].includes(event.status)) pending.delete(viewFor(event.chat));
   });
   window.approvals = { show };
 })();

@@ -60,7 +60,7 @@ function promteFixture({ fail, entries = sourceEntries } = {}) {
   const deployments = new Deployments(memory.store, { providers: { promte: provider }, artifact: async () => material });
   return { ...memory, deployments, calls, material: () => material, change: value => { material = value; }, upload: () => upload };
 }
-test('Del gennemgår og uploader præcis Promtes filudvalg med nyt fingeraftryk og viste fravalg', async () => {
+test('Udgiv gennemgår og uploader præcis Promtes filudvalg med nyt fingeraftryk og viste fravalg', async () => {
   const f = promteFixture(), original = f.material(), expected = preparePromteArtifact(original);
   const review = await f.deployments.review(root, promteConfig);
   assert.deepEqual(review.files, ['package.json', 'src/main.jsx']);
@@ -79,7 +79,7 @@ test('Del gennemgår og uploader præcis Promtes filudvalg med nyt fingeraftryk 
   const checked = await f.deployments.check(root);
   assert.equal(checked.state, 'REVIEWING'); assert.equal(checked.checks.site.status, 'skipped');
 });
-test('Del beregner Promtes uploadhash igen og afviser ændret kildekode eller Git-version', async () => {
+test('Udgiv beregner Promtes uploadhash igen og afviser ændret kildekode eller Git-version', async () => {
   for (const change of ['kildekode', 'version', 'privat fil']) {
     const f = promteFixture(), review = await f.deployments.review(root, promteConfig);
     if (change === 'kildekode') f.change(artifact({ ...sourceEntries, 'src/main.jsx': 'Anden kildekode' }));
@@ -99,7 +99,7 @@ test('Den oprindelige fil- og Git-kontrol udføres før Promtes fravalg og før 
   await assert.rejects(f.deployments.review(root, promteConfig), /lokale ændringer/);
   assert.equal(f.calls.length, 0);
 });
-test('Del bevarer PREPARED og UPLOADED uden at kalde en uafklaret handling udgivet', async () => {
+test('Udgiv bevarer PREPARED og UPLOADED uden at kalde en uafklaret handling udgivet', async () => {
   for (const [fail, state, message] of [['upload', 'PREPARED', /oprettet hos Promte.*upload er ikke bekræftet/], ['finalize', 'UPLOADED', /modtaget filerne.*videre behandling er ikke bekræftet/]]) {
     const f = promteFixture({ fail }), review = await f.deployments.review(root, promteConfig);
     const receipt = await f.deployments.deploy(root, review.token);
@@ -166,7 +166,7 @@ test('Pages stopper ændret GitHub-version før dispatch og afviser backend før
   await assert.rejects(backend.deployments.review(root, pagesConfig), /serverkode/);
   assert.equal(backend.calls.length, 0);
 });
-test('Del bruger DNS-fast sidekontrol for Pages med eget domæne og følger ikke viderestilling', async t => {
+test('Udgiv bruger DNS-fast sidekontrol for Pages med eget domæne og følger ikke viderestilling', async t => {
   const { EventEmitter } = require('node:events'), { PassThrough } = require('node:stream');
   let address = '1.1.1.1', requests = 0, status = 200;
   t.mock.method(require('node:dns/promises'), 'lookup', async () => [{ address, family: 4 }]);

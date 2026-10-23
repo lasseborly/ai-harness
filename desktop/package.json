@@ -1,7 +1,7 @@
 {
   "name": "aura-desktop",
   "productName": "Aura",
-  "version": "0.4.0-beta.1",
+  "version": "0.6.0-beta.1",
   "private": true,
   "license": "EUPL-1.2",
   "feedback": {
@@ -33,11 +33,16 @@
     "test:openrouter": "node scripts/verify-live-openrouter.cjs",
     "test:preferences": "node scripts/verify-preferences.cjs",
     "test:deployment": "node scripts/verify-deployment.cjs",
+    "test:promte-share": "node scripts/verify-promte-share.cjs",
+    "test:promte-preview": "node scripts/verify-promte-preview.cjs",
+    "test:komplai-preview": "node scripts/verify-komplai-preview.cjs",
+    "test:share-entry": "node scripts/verify-share-entry.cjs",
     "test:publishing-options": "node scripts/verify-publishing-options.cjs",
     "test:introduction": "node scripts/verify-introduction.cjs",
     "runtime:prepare": "node scripts/prepare-runtime.cjs",
     "package:mac": "electron-builder --config electron-builder.cjs --mac --publish never",
     "package:windows": "electron-builder --config electron-builder.cjs --win --publish never",
+    "package:linux": "electron-builder --config electron-builder.cjs --linux --x64 --publish never",
     "test:package": "node scripts/verify-package.cjs",
     "release:site": "node scripts/release-site.cjs",
     "test:resume": "node scripts/verify-resume.cjs",
@@ -59,7 +64,9 @@
     "test:preview-edit": "node scripts/verify-preview-edit.cjs",
     "test:history": "node scripts/verify-history.cjs",
     "test:chats": "node scripts/verify-chats.cjs",
-    "test:concurrent": "node scripts/verify-concurrent.cjs"
+    "test:concurrent": "node scripts/verify-concurrent.cjs",
+    "test:project-list": "node scripts/verify-project-list.cjs",
+    "test:output-limit": "node scripts/verify-output-limit.cjs"
   },
   "engines": {
     "node": ">=22.12.0"
@@ -71,6 +78,8 @@
   },
   "author": "AI Alliancen",
   "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.81",
+    "@opencode-ai/plugin": "1.18.33",
     "electron-updater": "6.8.9",
     "semver": "7.8.5"
   }

@@ -16,6 +16,8 @@ const helpers = require('./ui-test-helpers.cjs');
   const realGit = execFileSync('/usr/bin/which', ['git'], { encoding: 'utf8' }).trim();
   await fs.writeFile(path.join(bin, 'git'), `#!/bin/sh\nexport GIT_CONFIG_GLOBAL=/dev/null\nexport GIT_CONFIG_NOSYSTEM=1\nexec '${realGit}' "$@"\n`, { mode: 0o755 });
   let project = '';
+  // En plan tæller kun med alle fire afsnit; ellers bliver svaret i samtalen uden plan.
+  const plan = '## Det bygger vi\nEn side med tre mødelokaler.\n## Sådan skal det se ud\nRolige kort.\n## Teknik og data\nHTML med lokale eksempeldata.\n## Det skal du prøve\nSe de tre lokaler.';
   const built = '<!doctype html><html lang="da"><head><meta charset="utf-8"><title>Lokaler</title></head><body><h1>Tre mødelokaler</h1></body></html>';
   const server = http.createServer(async (req, res) => {
     if (req.url === '/v1/models') { res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify({ data: [{ id: 'test-model', name: 'Kontrolleret testmodel' }] })); }
@@ -24,7 +26,7 @@ const helpers = require('./ui-test-helpers.cjs');
     const planning = JSON.stringify(body.messages).includes('PLANLÆGNING:');
     const tool = !planning && body.tools?.length && !body.messages.some(m => m.role === 'tool') ? { id: 'skriv', type: 'function', function: { name: 'write', arguments: JSON.stringify({ filePath: path.join(project, 'public/index.html'), content: built }) } } : null;
     res.setHeader('content-type', 'text/event-stream');
-    const chunk = { id: 'test', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta: tool ? { role: 'assistant', tool_calls: [{ index: 0, ...tool }] } : { role: 'assistant', content: planning ? 'Forslag: En side med tre mødelokaler.' : 'Siden er bygget.' }, finish_reason: null }] };
+    const chunk = { id: 'test', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta: tool ? { role: 'assistant', tool_calls: [{ index: 0, ...tool }] } : { role: 'assistant', content: planning ? plan : 'Siden er bygget.' }, finish_reason: null }] };
     res.write('data: ' + JSON.stringify(chunk) + '\n\n');
     res.write('data: ' + JSON.stringify({ ...chunk, choices: [{ index: 0, delta: {}, finish_reason: tool ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200 } }) + '\n\n');
     res.end('data: [DONE]\n\n');
@@ -53,6 +55,8 @@ const helpers = require('./ui-test-helpers.cjs');
     const connection = await helpers.addConnection(page, { name: 'Kontrolleret model', baseURL: `http://127.0.0.1:${server.address().port}/v1` });
     await helpers.taskOptions(page); await page.selectOption('#connection-select', connection.id);
     await page.waitForFunction(() => document.querySelector('#model-select').options.length === 2); await page.locator('#model-shortlist button').first().click();
+    // Samtale er standard. Opgaven bygges efter en plan, så prøven vælger Planlæg.
+    assert.equal(await page.inputValue('#work-mode'), 'chat'); await helpers.selectMode(page, 'plan');
     // 2. En AI-opgave gemmes automatisk som en version, og kortet tilbyder at fortryde den.
     await page.click('#send'); await page.waitForSelector('#data-dialog[open]'); await page.click('#accept-send');
     await page.waitForSelector('#plan-card:not([hidden])', { timeout: 60000 }); await page.waitForFunction(() => !document.querySelector('#build-plan').disabled);
@@ -76,7 +80,9 @@ const helpers = require('./ui-test-helpers.cjs');
     await page.screenshot({ path: path.join(root, 'versioner.png'), animations: 'disabled' });
     await page.locator('#git-history .version-row').filter({ hasText: 'AI-opgave ·' }).click(); await page.click('#version-restore');
     await page.waitForFunction(() => !document.querySelector('#restore-confirm').disabled); await page.click('#restore-confirm');
-    await page.locator('#message').filter({ hasText: 'gemt som en ny version' }).waitFor();
+    // Resultatkortet har samme tekst som efter Fortryd opgaven. Dialogen lukker først, når gendannelsen er færdig.
+    await page.waitForSelector('#restore-dialog:not([open])', { state: 'attached' });
+    assert.match(await page.locator('#run-review').textContent(), /gemt som en ny version/);
     assert.equal(await fs.readFile(path.join(project, 'public/index.html'), 'utf8'), built);
     assert.match((await log())[0], /^Gendannet til: Byg første udkast/);
     // 5. Gem version med ét klik efter brugerens egen ændring.

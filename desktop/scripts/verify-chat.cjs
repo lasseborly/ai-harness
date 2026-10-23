@@ -165,7 +165,7 @@ const { run } = require('../core/git.cjs');
   await page.click('#tab-changes'); await page.click('#changes-view-session'); await page.locator('#changes-files .file-row[data-file="public/index.html"]').waitFor();
   assert.match(await page.locator('#changes-diff-lines').innerText(),/Bygget fra desktopchatten/);
   await page.click('#tab-preview');
-  // Sammenhængende forløb på den byggede fil: ret i preview, se diff, fortryd og gennemgå deling.
+  // Sammenhængende forløb på den byggede fil: ret i preview, se diff, fortryd og gennemgå udgivelsen.
   if (!process.env.HARNESS_TEST_PACKAGE) {
     const built = await fs.readFile(path.join(project, 'public/index.html'), 'utf8');
     await page.click('#preview-pick'); await page.frameLocator('#preview').locator('[data-aura-markering]').waitFor({state:'attached'});
@@ -179,11 +179,16 @@ const { run } = require('../core/git.cjs');
     await page.click('#preview-pick');
     await require('./ui-test-helpers.cjs').enableSharing(page);
     await app.evaluate(async(_,modulePath)=>{const {VercelDeployment}=process.mainModule.require(modulePath);VercelDeployment.prototype.inspect=async()=>({id:'prj_journey',name:'Samlet forløb',access:'Adgang ikke kontrolleret',region:'Ukendt',environmentKeys:[],portal:'https://vercel.com/test/journey'});VercelDeployment.prototype.deploy=async()=>{throw Error('Forløbsprøven må aldrig uploade');};},path.resolve(__dirname,'../core/deployment-providers.cjs'));
-    await page.click('#deploy-button');await page.waitForFunction(()=>!document.querySelector('#deployment-fields').disabled);await page.fill('#deploy-project','journey');await page.fill('#deploy-scope','test');await page.click('#deployment-form button[type=submit]');
-    await page.waitForSelector('#deployment-review:not([hidden])');assert.match(await page.locator('#deployment-summary').innerText(),/Byg første udkast/);assert.equal(await page.isEnabled('#deployment-send'),false);
+    // Udgiv: Udgiv fra Aura › Vercel › Udgiv én testversion › team › projekt › filer › gennemgang. Prøven trykker aldrig Udgiv.
+    const idle=()=>page.waitForFunction(()=>!document.querySelector('#deployment-fields').disabled), next=async()=>{await page.click('#deployment-next');await idle();};
+    await page.click('#deploy-button');await idle();await page.click('#deployment-other');
+    if(!await page.locator('[data-provider="vercel"]').isVisible()) await page.click('#deployment-more-providers');
+    await page.click('[data-provider="vercel"]');await idle();await page.click('#deployment-vercel-once');await idle();
+    await page.fill('#deploy-scope','test');await next();await page.fill('#deploy-project','journey');await next();await next();
+    await page.waitForSelector('#deployment-review:not([hidden])');assert.match(await page.locator('#deployment-summary').innerText(),/Byg første udkast/);assert.match(await page.locator('#deployment-files').textContent(),/index\.html/);
     await page.click('[data-close="deployment-dialog"]');
     assert.equal((await run(project,['status','--porcelain'])).toString(),'');
-    console.log('Samlet idé → plan → bygning → tekstrettelse → diff → fortrydelse → delingsgennemgang bestået på samme projektfil; ingen cloud-upload');
+    console.log('Samlet idé → plan → bygning → tekstrettelse → diff → fortrydelse → gennemgang i Udgiv bestået på samme projektfil; ingen cloud-upload');
   }
   await require('./ui-test-helpers.cjs').menuClick(page, '#skills-button');await page.selectOption('#skill-select','harness-git-og-samarbejde');
   const original=await page.inputValue('#skill-content');await page.fill('#skill-content',original+'\nTesttilpasning.');await page.click('#skill-save');

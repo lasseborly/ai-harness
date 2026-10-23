@@ -20,8 +20,9 @@ function render(releases, metadata) {
     const expected = prefix + encodeURIComponent(a.name);
     if (a.browser_download_url !== expected) throw new Error('Downloadadressen matcher ikke repository og version.');
     const mac = a.name.includes('-mac-');
-    const label = mac ? (a.name.includes('-arm64.') ? 'Mac · Apple-chip' : 'Mac · Intel') : (a.name.includes('-arm64.') ? 'Windows · ARM64' : 'Windows · x64');
-    return `<article class="artifact"><a class="button" href="${escape(expected)}">Hent ${label}</a><small>${Math.ceil(a.size / 1024 / 1024)} MB · Testversion</small><details><summary>Se detaljer</summary><small>${escape(a.name)}<br>Signering og ${mac?'notarisation':'Windows-afprøvning'}: se udgivelsesnoterne.<br>SHA-256: ${a.digest.slice(7)}</small></details></article>`;
+    const linux = a.name.includes('-linux-');
+    const label = mac ? (a.name.includes('-arm64.') ? 'Mac · Apple-chip' : 'Mac · Intel') : linux ? 'Linux · x64' : (a.name.includes('-arm64.') ? 'Windows · ARM64' : 'Windows · x64');
+    return `<article class="artifact"><a class="button" href="${escape(expected)}">Hent ${label}</a><small>${Math.ceil(a.size / 1024 / 1024)} MB · Testversion</small><details><summary>Se detaljer</summary><small>${escape(a.name)}<br>Signering og ${mac?'notarisation':linux?'AppImage-afprøvning':'Windows-afprøvning'}: se udgivelsesnoterne.<br>SHA-256: ${a.digest.slice(7)}</small></details></article>`;
   }).join('');
   return access + `<p>Senest udgivet: <strong>${escape(release.tag_name)}</strong>${release.prerelease ? ' · testversion' : ''}.</p>` + (links || '<p>Versionen har endnu ingen installationsfiler.</p>') + `<p><a href="https://github.com/${repository}/releases/tag/${encodeURIComponent(release.tag_name)}">Læs udgivelsesnoter og installationsstatus ↗</a></p>`;
 }

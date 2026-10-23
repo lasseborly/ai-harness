@@ -12,8 +12,9 @@ const helpers = require('./ui-test-helpers.cjs');
 const { auditUI } = require('./ui-audit.cjs');
 
 const state = { project: null, builds: 0, requests: 0 };
+const withoutVersions = process.env.AURA_MEASURE_NO_GIT === '1';
 const page = title => `<!doctype html><html lang="da"><head><meta charset="utf-8"><title>${title}</title></head><body><h1>${title}</h1><p>Tre fiktive mødelokaler.</p></body></html>`;
-const plan = 'Det bygger vi\nEn side med tre fiktive mødelokaler og et felt til antal deltagere.\n\nDet skal du prøve\nSkriv 8 i feltet, og kontrollér, at kun de store lokaler vises.';
+const plan = 'Det bygger vi\nEn side med tre fiktive mødelokaler og et felt til antal deltagere.\n\nSådan skal det se ud\nTre tydelige kort og et felt øverst.\n\nTeknik og data\nEn lokal hjemmeside med opdigtede lokaler.\n\nDet skal du prøve (i forhåndsvisningen)\nSkriv 8 i feltet, og kontrollér, at kun de store lokaler vises.';
 const isToolResult = message => Array.isArray(message.content) && message.content.some(part => part.type === 'tool_result');
 function stream(response, reply) {
   const block = reply.tool ? { type: 'tool_use', id: `toolu_${state.requests}`, name: reply.tool, input: {} } : { type: 'text', text: '' };
@@ -51,6 +52,7 @@ const server = http.createServer(async (req, res) => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const app = await electron.launch({ executablePath: require('electron'), args: [path.join(__dirname, '..'), '--user-data-dir=' + path.join(root, 'appdata')], env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, ELECTRON_RUN_AS_NODE: undefined } });
   await helpers.isolateDocuments(app, documents);
+  if (withoutVersions) await helpers.forbidGitWrites(app);
   // Anthropic går til den kontrollerede server, og Ollama på computeren svarer med én fast model.
   await app.evaluate((_, port) => { const original = global.fetch; global.fetch = (url, options) => { const value = String(url); if (value === 'http://127.0.0.1:11434/api/tags') return Promise.resolve(new Response(JSON.stringify({ models: [{ name: 'qwen3:8b' }] }), { headers: { 'content-type': 'application/json' } })); return original(value.startsWith('https://api.anthropic.com/') ? value.replace('https://api.anthropic.com', `http://127.0.0.1:${port}`) : url, options); }; }, server.address().port);
   const win = await app.firstWindow(); win.setDefaultTimeout(60000);
@@ -101,11 +103,13 @@ const server = http.createServer(async (req, res) => {
     await win.evaluate(() => { for (const details of document.querySelectorAll('#onboarding details')) details.open = false; });
     // Første resultat.
     begin('Fra idé til første udkast');
+    if (withoutVersions) await win.evaluate(() => window.harness.featuresSave({ scope: 'alle', values: { versioner: false } }));
     await win.fill('#purpose', 'Jeg vil lave en oversigt over tre fiktive mødelokaler.');
     await click('#create'); await win.waitForSelector('#workspace:not([hidden])');
     state.project = path.join(documents, 'Aura', (await fs.readdir(path.join(documents, 'Aura')))[0]);
     await measure('arbejdsomraade', '#workspace', 'Arbejdsområde: tomt projekt');
     task = null; await win.click('#model-chip'); await measure('din-ai', '#task-dialog', 'Din AI'); await win.click('[data-close="task-dialog"]'); task = 'Fra idé til første udkast';
+    await helpers.selectMode(win, 'plan');
     await click('#send'); await win.waitForSelector('#data-dialog[open]'); await measure('foer-du-sender', '#data-dialog', 'Før du sender');
     task = null; await win.locator('#data-dialog details > summary').first().click(); await measure('foer-du-sender-alt', '#data-dialog', 'Før du sender · Se alle oplysninger'); await win.locator('#data-dialog details > summary').first().click(); task = 'Fra idé til første udkast';
     await click('#accept-send');
@@ -115,12 +119,11 @@ const server = http.createServer(async (req, res) => {
     await measure('forslag', '#plan-card', 'Forslag: klar til at bygge?');
     task = null; await win.click('#plan-open'); await measure('plan', '#panel-plan', 'Plan: brief og plan'); await win.click('#tab-preview'); task = 'Fra idé til første udkast';
     await click('#build-plan');
-    const allow = win.locator('#approvals button').filter({ hasText: 'Tillad for denne opgave' }).first(); await allow.waitFor({ timeout: 120000 });
+    const allow = win.locator('#approvals button').filter({ hasText: 'Tillad én gang' }).first(); await allow.waitFor({ timeout: 120000 });
     await measure('godkendelse', '#approvals', 'Godkendelse af filændringer');
     tasks[task]++; await allow.click();
-    await win.locator('#run-review button').filter({ hasText: 'Fortryd opgaven' }).waitFor({ timeout: 120000 }); await win.locator('#run-status').filter({ hasText: 'Klar' }).waitFor();
-    // Resultatkortet måles, når Auras kontrol af forhåndsvisningen er færdig.
-    await win.locator('#run-review .check-list li').first().waitFor(); await win.waitForFunction(() => !document.querySelector('#run-review .check-pending'), null, { timeout: 30000 });
+    await win.locator('#run-review .result-receipt').waitFor({ timeout: 120000 }); await win.locator('#run-status').filter({ hasText: 'Klar' }).waitFor();
+    // Kontrolresultaterne ligger i Aktivitet; samtalen måles med den korte kvittering.
     await measure('resultat', '#run-review', 'Resultatkort'); task = null;
     // Ret i siden på AI'ens første udkast: vælg, valgt element, ny tekst og resultat. Rettelsen fortrydes bagefter.
     begin('Ret en tekst i siden');
@@ -133,15 +136,18 @@ const server = http.createServer(async (req, res) => {
     await win.click('#pick-close'); await win.click('#preview-pick');
     // Fortryd og versioner.
     begin('Fortryd opgaven');
+    await click('#run-review .result-options > summary');
     await click('#run-review button >> text=Fortryd opgaven'); await win.waitForFunction(() => !document.querySelector('#restore-confirm').disabled);
     await measure('fortryd', '#restore-dialog', 'Fortryd opgaven');
     await click('#restore-confirm'); await win.waitForSelector('#restore-dialog:not([open])', { state: 'attached' }); task = null;
+    if (!withoutVersions) {
     await helpers.menuClick(win, '#git-button'); await win.locator('#git-summary').filter({ hasText: 'Alt er gemt.' }).waitFor();
     await win.locator('#git-history .version-row img[src^="data:image/jpeg"]').first().waitFor({ timeout: 30000 }); await measure('versioner', '#versions-view', 'Versioner');
     await win.click('#git-advanced > summary'); await measure('versioner-avanceret', '#versions-view', 'Versioner · Avanceret'); await win.click('#git-advanced > summary');
     // Én version med billeder før og efter, filerne og vejene tilbage.
     await win.locator('#git-history .version-row').filter({ hasText: 'AI-opgave ·' }).click(); await win.locator('#version-compare img[src^="data:image/jpeg"]').first().waitFor({ timeout: 30000 });
     await win.locator('#changes-diff-lines .diff-row').first().waitFor(); await measure('version', '#panel-changes', 'Version: før, efter og filer'); await win.click('#version-back');
+    }
     // Arbejdsfladens faner efter opgaven og fortrydelsen: Ændringer, Kode og Aktivitet.
     // Ændringer måles på AI'ens opgave, ikke på tekstrettelsen ovenfor, så målingen kan sammenlignes med tidligere.
     await win.click('#tab-changes'); await win.click('#changes-view-session'); await win.locator('#changes-heading').filter({ hasText: 'ændret' }).waitFor();
@@ -155,14 +161,14 @@ const server = http.createServer(async (req, res) => {
     await helpers.menuClick(win, '#features-button'); await measure('funktioner', '#features-dialog', 'Funktioner');
     await win.locator('#features-list input[data-feature="deling"]').check(); await win.locator('#features-feedback').filter({ hasText: 'Gemt' }).waitFor();
     await win.click('#features-advanced > summary'); await win.click('#skills-button'); await measure('instruktioner', '#skills-dialog', 'Instruktioner i projektet'); await win.click('[data-close="skills-dialog"]'); await win.click('[data-close="features-dialog"]');
-    await win.click('#deploy-button'); await win.waitForSelector('#deployment-dialog[open]'); await measure('del', '#deployment-dialog', 'Del'); await win.click('[data-close="deployment-dialog"]');
+    await win.click('#deploy-button'); await win.waitForSelector('#deployment-dialog[open]'); await measure('udgiv', '#deployment-dialog', 'Udgiv'); await win.click('[data-close="deployment-dialog"]');
     await helpers.menuClick(win, '#publish-button'); await win.waitForSelector('#hosting-dialog[open]');
     // GitHub-status indlæses efter, at dialogen åbner; vent på den, så målingen er den samme fra gang til gang.
     await win.waitForFunction(() => document.querySelector('#hosting-status').textContent.trim()); await measure('sikkerhedskopi', '#hosting-dialog', 'Sikkerhedskopi'); await win.click('[data-close="hosting-dialog"]');
     await helpers.menuClick(win, '#connections-button'); await measure('forbindelser', '#connections-dialog', 'Administrer forbindelser'); await win.click('[data-close="connections-dialog"]');
     await helpers.menuClick(win, '#support-button'); await win.waitForSelector('#support-dialog[open]'); await measure('hjaelp', '#support-dialog', 'Hjælp og feedback'); await win.click('[data-close="support-dialog"]');
     // Samtaler i sidepanelet og kommandopaletten.
-    task = null; await win.click('#new-conversation'); await win.waitForFunction(() => document.querySelectorAll('#project-list .chat-row').length >= 2);
+    task = null; await win.click('#project-list .project-entry.is-current .project-add'); await win.waitForFunction(() => document.querySelectorAll('#project-list .chat-row').length >= 2);
     await measure('sidepanel', '#sidebar', 'Sidepanel: projekter og samtaler');
     await win.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+K'); await win.waitForSelector('#palette[open]'); await measure('palet', '#palette', 'Kommandopalet'); await win.keyboard.press('Escape');
     await win.click('#tools-button'); await win.waitForSelector('#tools-dialog[open]'); await measure('kodevaerktoej', '#tools-dialog', 'Aura Harness i dit kodeværktøj'); await win.click('#tools-dialog [data-close]');
@@ -170,8 +176,10 @@ const server = http.createServer(async (req, res) => {
     const rows = [...results].sort((a, b) => b.words - a.words);
     const table = ['| Skærm | Ord | Valg | ⓘ | Felter | Skærmbillede |', '|---|---:|---:|---:|---:|---|', ...rows.map(row => `| ${row.title} | ${row.words} | ${row.choices} | ${row.infos} | ${row.fields} | ${row.file} |`)].join('\n');
     const clicks = ['| Opgave | Klik |', '|---|---:|', ...Object.entries(tasks).map(([name, count]) => `| ${name} | ${count} |`)].join('\n');
-    await fs.writeFile(path.join(out, 'maalinger.md'), `# Måling af skærme\n\nMålt ${new Date().toISOString().slice(0, 10)} i Electron med en kontrolleret model. Ord og valg tæller kun det, der er synligt i skærmens eget område; lukkede afsnit tæller ikke med. Ord i en liste tæller alle dens muligheder med. Valg er knapper, links, kontakter, lister og foldbare afsnit. ⓘ er forklaringer, der åbnes med et klik. Felter er tekstfelter.\n\n${table}\n\n## Klik pr. opgave\n\n${clicks}\n\nSidefejl: ${errors.length}\n`);
-    await fs.writeFile(path.join(out, 'maalinger.json'), JSON.stringify({ results, tasks, errors }, null, 2));
+    if (withoutVersions) await helpers.assertNoGitWrites(app);
+    const omission = withoutVersions ? 'Prøven blokerer Git-skrivninger. De tre skærme til versionsoprettelse og versionshistorik er derfor udeladt.\n\n' : '';
+    await fs.writeFile(path.join(out, 'maalinger.md'), `# Måling af skærme\n\nMålt ${new Date().toISOString().slice(0, 10)} i Electron med en kontrolleret model. Ord og valg tæller kun det, der er synligt i skærmens eget område; lukkede afsnit tæller ikke med. Ord i en liste tæller alle dens muligheder med. Valg er knapper, links, kontakter, lister og foldbare afsnit. ⓘ er forklaringer, der åbnes med et klik. Felter er tekstfelter.\n\n${omission}${table}\n\n## Klik pr. opgave\n\n${clicks}\n\nSidefejl: ${errors.length}\n`);
+    await fs.writeFile(path.join(out, 'maalinger.json'), JSON.stringify({ results, tasks, errors, withoutVersions, omitted: withoutVersions ? ['Versioner', 'Versioner · Avanceret', 'Version: før, efter og filer'] : [] }, null, 2));
     console.log(JSON.stringify({ status: errors.length ? 'sidefejl' : 'målt', out, skaerme: results.length, ord: results.reduce((sum, row) => sum + row.words, 0), tasks, errors }, null, 2));
     if (errors.length) process.exitCode = 1;
   } catch (error) {

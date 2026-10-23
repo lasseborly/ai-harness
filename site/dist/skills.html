@@ -1454,24 +1454,24 @@ Oplysningerne er kontrolleret 30. september 2026. Erhvervsstyrelsen er dataansva
         <h3>Promte</h3>
         <p>Bygger en app, der kører i et Promte-arbejdsområde, og uploader kildekoden, så Promte tjekker og bygger den.</p>
         <dl class="faq">
-          <dt>Hvad gør den?</dt><dd>Hjælper agenten med at opsætte et React-projekt efter Promtes byggeregler, bruge app-biblioteket til modeller, vidensbaser og data og uploade kildekoden med Promtes kommandolinjeværktøj.</dd>
+          <dt>Hvad gør den?</dt><dd>Hjælper agenten med at opsætte et React-projekt efter Promtes byggeregler og bruge app-biblioteket til modeller, vidensbaser og data. I Aura udgiver brugeren med Udgiv, i andre værktøjer med Promtes kommandolinjeværktøj.</dd>
           <dt>Hvornår bruges den?</dt><dd>Når en løsning skal køre som app i et Promte-arbejdsområde.</dd>
           <dt>Hvad får du?</dt><dd>Et projekt, som Promte kan bygge, uden nøgler i koden, og en version, der venter på godkendelse eller er udgivet i arbejdsområdet.</dd>
-          <dt>Hvad gør den ikke?</dt><dd>Opretter ikke en Promte-konto, et arbejdsområde eller administratorrettigheder for dig og godkender ikke versioner. Kommandolinjeværktøjet hentes fra npm, når brugeren siger ja.</dd>
+          <dt>Hvad gør den ikke?</dt><dd>Opretter ikke en Promte-konto eller administratorrettigheder for dig og godkender ikke versioner. Agenten udgiver ikke selv fra Aura. Kommandolinjeværktøjet i andre værktøjer hentes fra npm, når brugeren siger ja.</dd>
         </dl>
         <dl class="faq integration-facts">
           <dt>System</dt><dd>Promte-apps via app-biblioteket og kommandolinjeværktøjet til upload</dd>
           <dt>Ejer</dt><dd>Promte</dd>
-          <dt>Adgang</dt><dd>Kræver en Promte-installation og administratorrettighed i appens arbejdsområde. Login til upload godkendes i browseren og gælder i 30 dage.</dd>
+          <dt>Adgang</dt><dd>Kræver en Promte-installation og administratorrettighed i appens arbejdsområde. Login til udgivelse godkendes i browseren og gælder i 30 dage. En ny app kan oprettes fra Aura.</dd>
           <dt>Data</dt><dd>Appens egne data og filer i Promte, privat for hver bruger eller fælles for arbejdsområdet. Om der er persondata, afhænger af appen.</dd>
           <dt>Dataflow</dt><dd>Appen kalder kun organisationens Promte-server, som sender modelkald videre til de modeller, organisationen har valgt. Kildekoden uploades til samme server, som bygger og gennemgår den.</dd>
           <dt>Pris</dt><dd>Kræver en aftale med Promte. Prisen er ikke offentliggjort og er ikke verificeret her.</dd>
           <dt>IT-afdelingen</dt><dd>Adgangen kræver hjælp fra IT-afdelingen.</dd>
         </dl>
-        <p class="review-date">Skillen vedligeholdes af Promte og er kontrolleret mod kilderne 2026-10-18.</p>
+        <p class="review-date">Skillen vedligeholdes af Promte og er kontrolleret mod kilderne 2026-10-21.</p>
         <details><summary>Se instruktionen til agenten</summary><pre>---
 name: harness-integration-promte
-description: Bygger en app, der kører i et Promte-arbejdsområde og bruger Promtes modeller, vidensbaser og data via app-biblioteket, og uploader kildekoden med Promtes kommandolinjeværktøj. Forklarer byggeregler, login, nøgler og godkendelse. Brug den, når projektet skal blive en Promte-app.
+description: Bygger en app, der kører i et Promte-arbejdsområde og bruger Promtes modeller, vidensbaser og data via app-biblioteket, og udgiver kildekoden med Auras Udgiv eller med Promtes kommandolinjeværktøj. Forklarer byggeregler, login, nøgler og godkendelse. Brug den, når projektet skal blive en Promte-app.
 ---
 
 # Promte
@@ -1486,23 +1486,29 @@ En Promte-app er en React-app, der kører i en iframe i et arbejdsområde i Prom
 
 ## Projektet
 
-Promte bygger med en fast React- og Vite-opsætning. Detaljer og fejlbeskeder står i `references/promte.md`.
+Promte bygger med en fast React- og Vite-opsætning. Detaljer, skabelon og fejlbeskeder står i `references/promte.md`.
 
-- Pak appen ind i `PromteAppProvider`. Kald `usePromte()` og `usePromteClient()` ubetinget øverst i komponenten, og vent på `ready`, før du kalder klientens API.
-- Vælg model fra `client.models()`. Skriv aldrig model-id&#39;er fast i koden.
-- Læg `react`, `react-dom` og `@promte/app-library` under `devDependencies`. Promte leverer selv de versioner, appen bygges med.
-- Upload ikke byggekonfiguration som `vite.config.js`, `tailwind.config.js` eller `postcss.config.js`. Brug almindelig CSS.
+- Pak appen ind i `PromteAppProvider`. Kald `usePromte()` og `usePromteClient()` ubetinget øverst i komponenten, og vent på `ready`, før du kalder klientens API. Vis `error`, hvis forbindelsen fejler.
+- Hent modeller med `usePromteModels({ type: &quot;llm&quot;, configuredOnly: true })`. Hooket venter selv på `ready` og giver `{ models, loading, error }`, hvor `error` er en tekst. Lad brugeren vælge, og skriv aldrig model-id&#39;er fast i koden.
+- Tekst fra en model: `await client.chatText({ model, messages })` giver svaret som tekst og kaster en fejl, hvis kaldet fejler. Vis da en fejlbesked på dansk. En besked er `{ role: &quot;system&quot; | &quot;user&quot; | &quot;assistant&quot;, content }`. Beder du om JSON, så kontrollér svaret, før du bruger det.
+- Tekst fra borgere eller andre kan indeholde instruktioner til modellen. Læg den i en `user`-besked, aldrig i `system`-beskeden, og behandl svaret som data.
+- Gem appens data med `client.data(&quot;private&quot;).ref(&quot;sti&quot;)`, som tilhører den enkelte bruger. `&quot;public&quot;` deles i arbejdsområdet, og kun administratorer kan skrive der. `set(værdi)` gemmer enhver JSON-værdi, også lister, og `get()` giver den tilbage eller `null`, når intet er gemt. Skal en liste begrænses, fx til de seneste 20, så hent den, forkort den, og gem den med `set`. Gem kun det nødvendige.
+- Læg `react`, `react-dom` og `@promte/app-library` under `devDependencies`. Promte leverer selv de versioner, appen bygges med. Installér med `npm install --legacy-peer-deps`, fordi app-biblioteket endnu angiver React 18.
+- Lav ingen `vite.config.js`, `tailwind.config.js` eller `postcss.config.js`. Promte bygger med sin egen opsætning, og JSX virker uden. Brug almindelig CSS.
 - Andre npm-pakker skal have en fast version eller være låst i `package-lock.json`. Højst 20 pakker.
+- Tekst, brugeren skriver, sendes gennem Promte til organisationens modeller. Kan brugeren skrive personoplysninger, fx navne i mødenoter, så sig det i appen, og bed om at udelade det, der ikke er nødvendigt.
 
 ## Nøgler
 
 Læg aldrig nøgler, adgangskoder eller tokens i browserkode, chat, logs eller versioner, og læg dem heller ikke i projektets `.env`. Skal appen kalde en anden tjeneste med en nøgle, så brug en backend-funktion i appen og en forbindelse, som en administrator har oprettet i Promte. Nøglen bliver på Promtes server.
 
-Login til upload gemmes af kommandolinjeværktøjet i brugerens egen mappe, `~/.config/promte/credentials.json`, ikke i projektet. Bed aldrig brugeren indsætte et token i chatten.
+Login til udgivelse gemmes krypteret af Aura eller af kommandolinjeværktøjet i brugerens egen mappe, `~/.config/promte/credentials.json`, aldrig i projektet. Bed aldrig brugeren indsætte et token i chatten.
 
-## Upload
+## Udgivelse
 
-Kommandoerne henter en pakke fra npm. Kør dem kun, når brugeren har sagt ja til det.
+**I Aura** udgiver brugeren selv med **Udgiv → Promte Apps**. Aura logger ind i browseren, viser brugerens apps eller opretter en ny og sender den seneste gemte version. Aura gemmer versioner med Git. Kør ikke upload-kommandoer fra Aura, og gem ikke selv en version uden at blive bedt om det. Når appen bygger lokalt, så foreslå, at brugeren gemmer en version i Aura og bruger Udgiv. Fejl fra Promtes bygning vises i Udgiv, så ret dem, og bed brugeren gemme en ny version.
+
+**I andre kodeværktøjer** bruges Promtes kommandolinjeværktøj. Kommandoerne henter en pakke fra npm. Kør dem kun, når brugeren har sagt ja til det.
 
 1. `npx @promte/app-upload login`. Brugeren godkender i browseren. Brug `--host` med organisationens Promte-adresse, hvis den ikke er `https://app.promte.dk`.
 2. `npx @promte/app-upload config --host &lt;adresse&gt; --workspaceId &lt;id&gt;`. Brug samme Promte-adresse som ved login. Id&#39;et står i adressen på appens arbejdsområde.
@@ -1511,7 +1517,12 @@ Kommandoerne henter en pakke fra npm. Kør dem kun, når brugeren har sagt ja ti
 
 ## Afprøvning
 
-Kør `npm run dev`, og åbn appens arbejdsområde i Promte. Vælg **Lokal forhåndsvisning til udvikling** under **Forhåndsvisning**, og indtast `http://localhost:5173`. Appen skal vise, at `ready` er sand, og en liste over modeller fra `client.models()`. Brug opdigtede data, aldrig rigtige borgeres oplysninger.
+Kontrollér først, at `npx vite build` lykkes. Appen taler kun med Promte, når en Promte-side omkring den svarer. Åbnet direkte i en almindelig browser venter den på `ready`.
+
+- **I Aura:** Start forhåndsvisningen som for andre projekter. Aura svarer som Promte, så appen får rigtige modeller og data. Når Promte-integrationen er slået til, beder Aura første gang brugeren logge ind med Promte og oprette en app med projektets navn. Udgiv bruger samme app senere.
+- **I andre værktøjer:** Kør `npm run dev`, åbn appens arbejdsområde i Promte, vælg **Lokal forhåndsvisning til udvikling** under **Forhåndsvisning**, og indtast `http://localhost:5173`. Det kræver administratoradgang til arbejdsområdet.
+
+Appen skal vise, at den er forbundet, og en liste over modeller. Brug opdigtede data, aldrig rigtige borgeres oplysninger.
 
 ## Bestilling til IT
 
@@ -1523,7 +1534,7 @@ Når brugeren mangler adgang, så skriv en kort bestilling med:
 - hvilke forbindelser til andre systemer appen skal bruge, hvis nogen.
 </pre><p class="tool-type"><code>references/promte.md</code></p><pre># Promte-apps i detaljer
 
-Kontrolleret mod Promte 18. oktober 2026. Den fulde engelske vejledning følger med `@promte/app-upload` og kan lægges i projektet med `npx @promte/app-upload skill`.
+Kontrolleret mod Promte 21. oktober 2026. Den fulde engelske vejledning følger med `@promte/app-upload` og kan uden for Aura lægges i projektet med `npx @promte/app-upload skill`.
 
 ## Mindste projekt
 
@@ -1549,7 +1560,6 @@ package-lock.json     kun nødvendig, hvis appen har pakker under dependencies
   &quot;dependencies&quot;: {},
   &quot;devDependencies&quot;: {
     &quot;@promte/app-library&quot;: &quot;^0.1.6&quot;,
-    &quot;@vitejs/plugin-react&quot;: &quot;^4.3.0&quot;,
     &quot;react&quot;: &quot;19.2.8&quot;,
     &quot;react-dom&quot;: &quot;19.2.8&quot;,
     &quot;vite&quot;: &quot;^5.4.10&quot;
@@ -1557,7 +1567,7 @@ package-lock.json     kun nødvendig, hvis appen har pakker under dependencies
 }
 ```
 
-Installér med `npm install --legacy-peer-deps`, så længe app-biblioteket angiver React 18 som peer. En `vite.config.js` med `@vitejs/plugin-react` må gerne ligge lokalt. Kommandolinjeværktøjet uploader den ikke.
+Installér med `npm install --legacy-peer-deps`, så længe app-biblioteket angiver React 18 som peer. Der skal ingen `vite.config.js` til. Vite bygger JSX uden. Promte bygger med Node 22, så brug gerne Node 22 lokalt. Node 20.18 eller nyere virker også.
 
 `src/main.jsx`:
 
@@ -1588,12 +1598,12 @@ createRoot(document.getElementById(&quot;root&quot;)).render(
 
 ## App-biblioteket
 
-`usePromte()` giver `ready`, `state` og `error`. `usePromteClient()` giver klienten:
+`usePromte()` giver `ready`, `state` og `error`. `state` er `booting`, `waiting_for_settings`, `waiting_for_token` eller `ready`. Uden for Promte når appen aldrig `ready`. `usePromteModels({ type, configuredOnly })` giver `{ models, loading, error, reload }`. `usePromteClient()` giver klienten:
 
 - `models({ type, configuredOnly })`: modeller med `id`, `label`, `type` og `configured`. Typer er `llm`, `embedding`, `image`, `stt` og `tts`.
-- `chatText({ model, messages })` og `chatCompletions(...)`.
+- `chatText({ model, messages })` giver svaret som tekst. `messages` er `[{ role: &quot;system&quot; | &quot;user&quot; | &quot;assistant&quot;, content }]`. `chatCompletions(...)` giver det fulde svar i OpenAI-format.
 - `embeddings.create({ model, input })`.
-- `data(scope).ref(&quot;a/b&quot;)` med `get`, `set`, `update`, `remove` og `push`. `private` er pr. bruger. `public` er fælles, og kun administratorer kan skrive.
+- `data(scope).ref(&quot;a/b&quot;)` med `get`, `set`, `update`, `remove` og `push`. `private` er pr. bruger. `public` er fælles, og kun administratorer kan skrive. `get()` giver `null`, når intet er gemt. `update({ &quot;x/y&quot;: værdi })` bruger stier under ref&#39;en. `push(værdi)` lægger til en liste og opretter den, hvis den mangler.
 - `files(scope)` på nyere Promte-servere: `upload`, `list`, `download` og `remove`.
 - `knowledge.search({ query, workspaceId })`.
 - `functions.invoke(navn, input)` kalder en backend-funktion.
@@ -1621,70 +1631,86 @@ Hver funktion er en mappe `functions/&lt;navn&gt;/` med `function.json`, `index.
       <article class="tool-entry skill-entry" id="harness-integration-komplai-run">
         <p class="tool-type">16 · <code>harness-integration-komplai-run</code></p>
         <h3>Komplai Run</h3>
-        <p>Forbereder statiske browserapps og vejleder om udgivelse fra Aura eller andre kodeværktøjer.</p>
+        <p>Bygger browserapps til komplai Run, også med komplais app-SDK, og vejleder om udgivelse fra Aura eller andre kodeværktøjer.</p>
         <dl class="faq">
-          <dt>Hvad gør den?</dt><dd>Hjælper med at bygge og gennemgå de filer, Run kan vise, vælge adgang og kontrollere den udgivne app. I Auras desktopapp bruges Del; fra Aura-terminalen henvises til manuel upload i Hub. Andre kodeværktøjer kan bruge Komplais terminalværktøj.</dd>
+          <dt>Hvad gør den?</dt><dd>Hjælper med at bygge og gennemgå de filer, Run kan vise, bruge komplais app-SDK til login, AI, Redact, gemte data og hændelseslog, vælge adgang og kontrollere den udgivne app. I Auras desktopapp bruges Udgiv; fra Aura-terminalen henvises til manuel upload i Run. Andre kodeværktøjer kan bruge komplais terminalværktøj.</dd>
           <dt>Hvornår bruges den?</dt><dd>Når du har valgt Komplai Run til en browserapp eller vil opdatere en app der.</dd>
           <dt>Hvad får du?</dt><dd>En gennemgået browserapp med alle nødvendige filer, en vej til udgivelse og en tydelig beskrivelse af, hvad der er afprøvet.</dd>
-          <dt>Hvad gør den ikke?</dt><dd>Giver ingen adgang og udgiver ikke uden dit valg. Agentens kommandoværktøj må ikke publicere i Aura. Run stiller ikke serverkode, database eller en AI-proxy til rådighed gennem denne udgivelsesvej.</dd>
+          <dt>Hvad gør den ikke?</dt><dd>Giver ingen adgang, godkender ikke appens brug af komplai og udgiver ikke uden dit valg. Agentens kommandoværktøj må ikke publicere i Aura. Run kører ingen serverkode; login, AI, Redact og gemte data fås kun gennem app-SDK&#39;et efter en administrators godkendelse.</dd>
         </dl>
         <dl class="faq integration-facts">
           <dt>System</dt><dd>Komplai Run</dd>
           <dt>Ejer</dt><dd>Komplai</dd>
-          <dt>Adgang</dt><dd>Kræver en Komplai-organisation med Run. Aura bruger login og en udgivelsesadgang til dine egne apps i 30 dage. Eget kodeværktøj bruger en nøgle til én app i syv dage.</dd>
-          <dt>Data</dt><dd>Færdig HTML, CSS, JavaScript og appens øvrige filer. Offentlig adgang gør alle de uploadede filer tilgængelige for enhver.</dd>
-          <dt>Dataflow</dt><dd>Filer uploades fra din computer til organisationens appmiljø gennem Komplai. Besøgende henter filerne til deres browser; appens eventuelle eksterne kald skal gennemgås særskilt.</dd>
+          <dt>Adgang</dt><dd>Kræver en komplai-organisation med Run. Aura bruger login og en udgivelsesadgang til dine egne apps i 30 dage. Eget kodeværktøj bruger en nøgle til én app i syv dage. En administrator godkender appens brug af login, AI, Redact og gemte data i Run.</dd>
+          <dt>Data</dt><dd>Færdig HTML, CSS, JavaScript og appens øvrige filer. Offentlig adgang gør alle de uploadede filer tilgængelige for enhver. Apps for organisationen kan gemme data og sende tekst til AI og Redact gennem app-SDK&#39;et; om der er persondata, afhænger af appen.</dd>
+          <dt>Dataflow</dt><dd>Filer uploades fra din computer til organisationens appmiljø gennem komplai. Besøgende henter filerne til deres browser. Appens SDK-kald går til appens egen adresse og derfra til komplai med den indloggede persons egen adgang; appens eventuelle eksterne kald skal gennemgås særskilt.</dd>
           <dt>Pris</dt><dd>Følger organisationens aftale. Aktuelle lager- og trafikrammer vises i Hub.</dd>
-          <dt>IT-afdelingen</dt><dd>Kræver ikke hjælp fra IT-afdelingen.</dd>
+          <dt>IT-afdelingen</dt><dd>Adgangen kræver hjælp fra IT-afdelingen.</dd>
         </dl>
-        <p class="review-date">Skillen vedligeholdes af Aura Harness og er kontrolleret mod kilderne 2026-10-18.</p>
+        <p class="review-date">Skillen vedligeholdes af Aura Harness og er kontrolleret mod kilderne 2026-10-22.</p>
         <details><summary>Se instruktionen til agenten</summary><pre>---
 name: harness-integration-komplai-run
-description: Forbereder statiske browserapps til Komplai Run og vejleder om udgivelse, adgang og kontrol af den udgivne version. Brug den, når brugeren har valgt Run til en ny app eller vil opdatere en app der. Skelner mellem Auras desktopapp, Aura-terminalen og andre kodeværktøjer.
+description: Bygger og forbereder browserapps til komplai Run, også apps der bruger komplais app-SDK til login, AI, Redact, gemte data og hændelseslog, og vejleder om udgivelse, godkendelse og kontrol af den udgivne version. Brug den, når brugeren har valgt Run til en ny app eller vil opdatere en app der. Skelner mellem Auras desktopapp, Aura-terminalen og andre kodeværktøjer.
 ---
 
-# Komplai Run
+# komplai Run
 
-Run viser færdige browserapps på adresser som `budget.komplai.run`. Brug denne skill, når brugeren har valgt Run. Den opretter ikke i sig selv adgang eller giver tilladelse til at udgive.
+Run viser færdige browserapps på adresser som `budget.komplai.run`. Brug denne skill, når brugeren har valgt Run. Den opretter ikke i sig selv adgang, godkender ikke appens brug af komplai og giver ikke tilladelse til at udgive.
 
 ## Forbered appen
 
 - Læs projektets eksisterende byggeopsætning. Byg React, Vite eller andre frameworks lokalt, og find den faktiske outputmappe med `index.html`. Upload ikke kildeprojektet.
 - Lever enten én HTML-fil med alt indhold indlejret eller en ZIP med `index.html` og alle nødvendige billeder, skrifttyper, CSS- og JavaScript-filer. Hver udgivelse erstatter hele versionen; filer fra den forrige version følger ikke med.
 - Brug relative filadresser eller stier fra appens egen rod. Kontrollér den færdige outputmappe i en browser, herunder navigation, indlæste filer og eksterne kald.
-- Run kører ingen serverkode og stiller ikke database, fælles fillager, AI-proxy eller funktioner til rådighed gennem denne udgivelsesvej. Kræver løsningen det, skal den del afklares særskilt. Browserens lokale lager er hverken fælles data eller en sikkerhedskopi.
+- Run kører ingen serverkode. Login, AI, Redact, gemte data og hændelseslog fås kun gennem komplais app-SDK, beskrevet nedenfor. Der er ingen cron, funktioner eller filupload. Browserens lokale lager er hverken fælles data eller en sikkerhedskopi.
 - Hold `.env`, nøgler, private data, kildekort og `node_modules` ude af udgivelsen. En browserapp kan ikke holde en API-nøgle hemmelig, heller ikke bag login.
+
+## Brug komplai fra appen
+
+- Indlæs SDK&#39;et med `&lt;script src=&quot;/_komplai/run/v1.js&quot;&gt;&lt;/script&gt;` i `&lt;head&gt;`. Det definerer `komplai`. Som modul bruges `import { komplai } from &quot;/_komplai/run/v1.mjs&quot;`. Run serverer filen fra appens egen adresse; læg den ikke i projektet. Stier under `/_komplai` afvises ved upload.
+- Erklær hver brug i `komplai.json` ved siden af `index.html` (med Vite i `public/`) eller i `&lt;script type=&quot;application/komplai+json&quot;&gt;` i `index.html`&#39;s `&lt;head&gt;`. Manifestet serveres med appen og må ikke indeholde noget hemmeligt. Giv hver brug en `reason` på brugerens sprog, så administratoren kan se, hvorfor appen har brug for den. Bed kun om det, appen bruger.
+- Brugene er `identity` med de felter, appen viser, `ai.chat` med behandlingen `eu-cloud` eller `connection`, `redact.text`, `data` med navngivne samlinger og `log` med hændelser, fejlrapporter og anonyme tællinger. Felter, grænser og fejlkoder står i komplais API-beskrivelse under kilderne.
+- En administrator godkender hver brug på appens side i Run under **Det må appen**. En ny version, der beder om mere, venter på en ny godkendelse; resten virker imens. Beskriv ikke en funktion som virkende, før den er afprøvet i Run efter godkendelsen.
+- Identitet, AI, Redact, gemte data og hændelser virker kun i apps, der er for organisationen. En offentlig app må kun bruge anonyme tællinger ud over tema, sprog og appens egne oplysninger.
+- Kald aldrig Hub eller komplais API direkte fra appen, og læg aldrig en nøgle, et token eller en adgangskode i appen. Alle kald går gennem SDK&#39;et til appens egen adresse.
+- Vis hver afvisning: en `KomplaiError` har `code` og `message` på personens sprog; vis beskeden. `capability_not_approved` betyder, at brugen endnu ikke er godkendt. Skift aldrig til en anden behandling, samling eller tjeneste efter en fejl.
+- Skriv data fra komplai ind på siden med `textContent` eller frameworkets tekstbinding, aldrig `innerHTML`.
+- Gemte data: Brug `scope: &quot;app&quot;` til det, appens brugere deler, og `organisation` kun til en samling, flere apps deler. Et medlem ændrer kun de dokumenter, medlemmet selv har oprettet. Brug `{ ifVersion: doc.version }`, når en opdatering ikke må overskrive andres ændringer, og håndtér `version_conflict`. Et medlems id navngiver ingen; gem navnet fra `komplai.me()` i dokumentet, hvis appen viser, hvem der skrev det. Overvej `retainDays` for persondata.
 
 ## I Auras desktopapp
 
-Brugeren udgiver gennem **Del** og Komplai-login. I nogle versioner hedder valget **komplai Publish**. Er deling slået fra, kan brugeren slå den til under **Indstillinger → Funktioner**.
+Brugeren udgiver gennem **Udgiv** og komplai-login. Er udgivelse slået fra, kan brugeren slå den til med **Udgiv → Slå udgivelse til** eller under **Indstillinger → Funktioner**.
 
-Agentens kommandoværktøj må ikke publicere. Brug hverken CLI, direkte API-kald eller en anden vej som omgåelse af Del. Forbered filerne og forklar det næste trin i appen; bed ikke om en udgivelsesnøgle i samtalen.
+Agentens kommandoværktøj må ikke publicere. Brug hverken CLI, direkte API-kald eller en anden vej som omgåelse af Udgiv. Forbered filerne og forklar det næste trin i appen; bed ikke om en udgivelsesnøgle i samtalen.
 
-Aura bruger en særskilt udgivelsesadgang, der gælder i 30 dage for personens egne apps i den valgte organisation. AI-adgang og udgivelsesadgang er forskellige. Lad brugeren vælge app i Del og gennemgå filerne før upload. Ved en ny app vælges adresse og adgang uden forvalg. En eksisterende app beholder sin adgang; ændringer af adgang, tilbagerulning, afpublicering og sletning håndteres i Hub under Run.
+Aura bruger en særskilt udgivelsesadgang, der gælder i 30 dage for personens egne apps i den valgte organisation. Lad brugeren vælge app i Udgiv og gennemgå filerne før upload. Ved en ny app vælges adresse og adgang uden forvalg; en offentlig app bekræftes med appens navn. En app, der bruger identitet, AI, Redact eller gemte data, skal være for organisationen. En eksisterende app beholder sin adgang; ændringer af adgang, godkendelser, tilbagerulning, afpublicering og sletning håndteres i Run.
+
+Run modtager kun færdige filer. Har appen et byggetrin, fx React med Vite, bruger Udgiv en gemt byggemappe (`dist`, `build` eller `out` med `index.html`). Findes den ikke, tilbyder Udgiv at bygge appen på brugerens computer i en midlertidig kopi af den gemte version efter brugerens ja: `npm ci` eller `npm install` uden pakkernes installationsscripts og derefter `npm run build`. komplai bygger intet. Projektet skal bruge npm og have et `build`-script, der skriver til en af de tre mapper. Byggemappen må gerne stå i `.gitignore`. Kør ikke selv upload; forklar brugeren, at Udgiv bygger. Kan bygningen ikke gennemføres, kan brugeren vælge en mappe med færdige filer i stedet.
+
+Når komplai Run-integrationen er slået til, svarer Auras forhåndsvisning appens SDK-kald gennem komplai med brugerens rigtige identitet og AI, mens data fra forhåndsvisningen holdes adskilt fra appens rigtige data. Første gang logger brugeren ind med komplai under **Udgiv** og opretter appen fra forhåndsvisningen; den er kun for organisationen. Brugene i projektets `komplai.json` gælder kun forhåndsvisningen. Efter udgivelse skal en administrator godkende dem under **Det må appen**, før de virker i Run; fortæl brugeren det.
 
 ## I Aura-terminalen
 
-`/deploy` understøtter Vercel og Azure Static Web Apps, ikke Komplai Run. Forbered filerne og henvis brugeren til manuel upload i Hub. Omgå ikke Auras udgivelsesforløb eller godkendelser med CLI eller direkte API-kald fra agentens kommandoværktøj.
+`/deploy` understøtter Vercel og Azure Static Web Apps, ikke komplai Run. Forbered filerne og henvis brugeren til manuel upload i Run. Omgå ikke Auras udgivelsesforløb eller godkendelser med CLI eller direkte API-kald fra agentens kommandoværktøj.
 
 ## I andre kodeværktøjer
 
-Læs [references/run.md](references/run.md) for terminalforløbet, uploadformatet og fejlhåndtering. Brug den versionsfaste kommando fra appens vejledning i Hub. Antag ikke, at pakken findes i npm-registret.
+Læs [references/run.md](references/run.md) for terminalforløbet, afprøvning med `komplai-publish dev`, uploadformatet og fejlhåndtering. Brug den versionsfaste kommando fra appens side i Run. Antag ikke, at pakken findes i npm-registret.
 
 Terminalforløbet bruger en nøgle til én eksisterende app, som udløber efter syv dage. Brugeren sætter den i værktøjets private miljø eller CLI&#39;ens skjulte nøglefelt. Læg den aldrig i chat, kommandoargumenter, projektfiler, versionshistorik eller logs. Udgiv kun, når brugeren har godkendt målappen, filerne og adgangen; en eksisterende godkendelse af samme handling skal ikke indhentes igen. Følg fortsat projektets regler for udgivelse og CI/CD.
 
 ## Adgang og resultat
 
-En offentlig app udleverer HTML og alle medsendte filer til enhver. En organisationsintern app kræver Komplai-login; en udgivelsesnøgle giver ikke læseadgang. Kontrollér den konkrete organisations aftale og rammer, hvis omkostninger eller databehandling er uafklaret. Lov ikke gratis drift eller en bestemt behandlingsregion ud fra produktnavnet.
+En offentlig app udleverer HTML og alle medsendte filer til enhver, også uden at have fået linket. En organisationsintern app kræver komplai-login; en udgivelsesnøgle giver ikke læseadgang. Kontrollér den konkrete organisations aftale og rammer, hvis omkostninger, AI-forbrug eller databehandling er uafklaret. Lov ikke gratis drift eller en bestemt behandlingsregion ud fra produktnavnet.
 
-Efter upload: åbn den faktiske appadresse, afprøv den vigtigste handling og kontrollér den valgte adgang. Ved afbrudt forbindelse eller ukendt udfald skal den aktive version kontrolleres i Hub før et nyt forsøg. Gentag ikke automatisk.
+Efter upload: åbn den faktiske appadresse, afprøv den vigtigste handling og kontrollér den valgte adgang. Ved afbrudt forbindelse eller ukendt udfald skal den aktive version kontrolleres i Run før et nyt forsøg. Gentag ikke automatisk.
 
-Rapportér den observerede version og de kontroller, der faktisk er gennemført. En lokal prøve, et godkendt upload og en afprøvet app på dens rigtige adresse er forskellige resultater.
+Rapportér den observerede version og de kontroller, der faktisk er gennemført. En lokal prøve, et godkendt upload, en godkendt brug og en afprøvet app på dens rigtige adresse er forskellige resultater.
 </pre><p class="tool-type"><code>references/run.md</code></p><pre># Komplai Run i andre kodeværktøjer
 
-Kontrolleret 18. oktober 2026 mod det offentligt hentede udgivelseskit, version 0.1.0, og Komplais dokumentation om Aura-login og appadresser. Kittets CLI er MIT-licenseret og kræver Node 22.15 eller nyere. Denne reference medtager ingen af dets scripts.
+Kontrolleret 22. oktober 2026 mod komplais udgivelseskit, version 0.2.1, med app-SDK&#39;ets API-beskrivelse, og komplais dokumentation om Aura-login og appadresser. Kittets CLI er MIT-licenseret og kræver Node 22.15 eller nyere. Denne reference medtager ingen af dets scripts.
 
-Dette terminalforløb gælder kodeværktøjer uden for Aura. I Auras desktopapp bruges **Del**; agentens kommandoværktøj må ikke stå for upload. Aura-terminalens `/deploy` understøtter kun Vercel og Azure Static Web Apps. Forbered Run-filerne til brugerens manuelle upload i Hub, og omgå ikke Auras godkendelser med kommandoerne her.
+Dette terminalforløb gælder kodeværktøjer uden for Aura. I Auras desktopapp bruges **Udgiv**; agentens kommandoværktøj må ikke stå for upload. Aura-terminalens `/deploy` understøtter kun Vercel og Azure Static Web Apps. Forbered Run-filerne til brugerens manuelle upload i Hub, og omgå ikke Auras godkendelser med kommandoerne her.
 
 ## Adgang til en eksisterende app
 
@@ -1699,14 +1725,24 @@ Brugeren sætter `KOMPLAI_PUBLISH_TOKEN` i værktøjets private miljø eller ind
 Brug den versionsfaste kommando, Hub viser for appen. Det offentlige kit beskriver denne form; erstat uploadadressen med appens faktiske adresse fra Hub:
 
 ```sh
-npx --package=https://hub.komplai.dk/komplai-publish/komplai-publish-0.1.0.tgz komplai-publish ./dist --endpoint https://hub.komplai.dk/api/publish/APP_UUID/releases --dry-run
+npx --package=https://hub.komplai.dk/komplai-publish/komplai-publish-0.2.1.tgz komplai-publish ./dist --endpoint https://hub.komplai.dk/api/publish/APP_UUID/releases --dry-run
 ```
 
-`./dist` skal være den færdigbyggede mappe, ikke en antagelse om projektets mappestruktur. `--dry-run` uploader intet. Kontrollér de faktiske filer og deres henvisninger i browseren; et filantal eller et vellykket pakkecheck beviser ikke, at appen virker. npm-registrering af `@komplai/publish` er ikke verificeret her, så brug ikke den kortere registreringsbaserede kommando som forudsætning.
+`./dist` skal være den færdigbyggede mappe, ikke en antagelse om projektets mappestruktur. `--dry-run` uploader intet, kræver ingen nøgle og kontrollerer også appens `komplai.json`, som Run gør. Kontrollér de faktiske filer og deres henvisninger i browseren; et filantal eller et vellykket pakkecheck beviser ikke, at appen virker. npm-registrering af `@komplai/publish` er ikke verificeret her, så brug ikke den kortere registreringsbaserede kommando som forudsætning.
 
 Når udgivelsen til den konkrete app er godkendt, fjernes `--dry-run`. CLI&#39;en viser målet og spørger før upload. `--yes` må kun bruges, når denne udgivelse allerede er godkendt og projektets regler tillader den. Kommandoen kan også modtage en færdig HTML-fil eller ZIP.
 
 Til manuel upload kan samme versionsfaste CLI bruges med `pack ./dist --out app.zip`. Det pakker kun lokalt; brugeren uploader derefter ZIP-filen i Hub. `init --endpoint …` gemmer kun uploadadresse og outputmappe i `.komplai-publish.json`, aldrig nøglen. Læs en eksisterende konfiguration før ændringer.
+
+## Afprøv SDK-kald lokalt
+
+Med samme pakkeadresse og `dev` i stedet for `--endpoint` serveres den færdige mappe på `http://localhost:5180`, som Run gør, med samme SDK, ruter og indholdspolitik:
+
+```sh
+npx --package=https://hub.komplai.dk/komplai-publish/komplai-publish-0.2.1.tgz komplai-publish dev ./dist
+```
+
+Kommandoen kører, til den stoppes; start den i baggrunden, og stop den efter afprøvningen. En stand-in svarer i stedet for komplai: alle erklærede brug tæller som godkendt, personen hedder Udvikler og er administrator (`--member` gør personen til almindeligt medlem), og gemte data ligger kun i hukommelsen. Hver browser kan logge ind som sin egen person på `/_komplai/dev`; et privat vindue kan være person nummer to. Redact finder kun mønstre. AI kræver en personlig API-nøgle i `KOMPLAI_API_KEY` i værktøjets private miljø; bed aldrig om den i chatten. Afvisninger skrives i terminalen. En bestået lokal prøve viser ikke, at brugen er godkendt i Run.
 
 ## Filer og grænser
 
@@ -1729,12 +1765,12 @@ HTTP 200 indeholder appens `id` og `activeRelease`. Kontrollér, at app-id&#39;e
 
 ## Kilder og afprøvningsstatus
 
-- [Komplais offentlige udgivelseskit](https://hub.komplai.dk/komplai-publish/komplai-publish.zip): `SKILL.md`, `API.md`, README og CLI 0.1.0.
+- [komplais udgivelseskit](https://hub.komplai.dk/komplai-publish/komplai-publish.zip): `SKILL.md`, `API.md` med app-SDK&#39;et, README og CLI 0.2.1.
 - [Run og terminalvejledning i Hub](https://hub.komplai.dk/publish?guide=1).
 
 Kilderne beskriver kontrakten. At kittet kan hentes, eller at skillen installeres korrekt, dokumenterer ikke et gennemført login, native upload eller adgangskontrol i produktion. Angiv disse som uafprøvede, indtil der er konkret evidens for det relevante miljø.
 </pre></details>
-        <p class="sources">Kilder: <a href="https://hub.komplai.dk/publish?guide=1">Komplai Run · vejledning i Hub ↗</a> · <a href="https://hub.komplai.dk/komplai-publish/komplai-publish.zip">Komplais offentlige udgivelseskit · API, skill og CLI 0.1.0 ↗</a></p>
+        <p class="sources">Kilder: <a href="https://hub.komplai.dk/publish?guide=1">komplai Run · vejledning i Hub ↗</a> · <a href="https://hub.komplai.dk/komplai-publish/komplai-publish.zip">komplais udgivelseskit · API med app-SDK, skill og CLI 0.2.1 ↗</a></p>
       </article>
       </section>
     </section>

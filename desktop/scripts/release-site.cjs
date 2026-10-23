@@ -22,9 +22,9 @@ async function generate(directory = path.join(root,'release')) {
  }
  let html=await fs.readFile(path.join(root,'../site/dist/desktop.html'),'utf8');
  const blocks=files.filter(f=>!f.name.endsWith('.zip')).map(f=>{
-  const mac=f.name.includes('-mac-'),arm=f.name.includes('arm64');
-  const label=mac?(arm?'Mac med Apple-chip':'Mac med Intel'):(arm?'Windows med ARM':'Windows');
-  return `<article class="artifact"><a class="button" download href="${encodeURIComponent(f.name)}">Hent til ${label}${f.name.endsWith('.zip')?' · ZIP':''}</a><small>${(f.bytes/1024/1024).toFixed(0)} MB · Testversion</small><details><summary>Se detaljer</summary><small>${escape(f.name)}<br>${!mac?'Windows-signering: se udgivelsesnoterne':f.notarized?'Notariseret af Apple · billet kontrolleret':'Notarisation afventes'}<br>SHA-256: ${f.sha256}</small></details></article>`;
+  const mac=f.name.includes('-mac-'),linux=f.name.includes('-linux-'),arm=f.name.includes('arm64');
+  const label=mac?(arm?'Mac med Apple-chip':'Mac med Intel'):(linux?'Linux':(arm?'Windows med ARM':'Windows'));
+  return `<article class="artifact"><a class="button" download href="${encodeURIComponent(f.name)}">Hent til ${label}${f.name.endsWith('.zip')?' · ZIP':''}</a><small>${(f.bytes/1024/1024).toFixed(0)} MB · Testversion</small><details><summary>Se detaljer</summary><small>${escape(f.name)}<br>${linux?'Usigneret AppImage: se udgivelsesnoterne':!mac?'Windows-signering: se udgivelsesnoterne':f.notarized?'Notariseret af Apple · billet kontrolleret':'Notarisation afventes'}<br>SHA-256: ${f.sha256}</small></details></article>`;
  }).join('');
  html=html.replace(/<!-- artifacts -->[\s\S]*?<!-- \/artifacts -->/,`<p>Version ${escape(version)}</p>${blocks || '<p>Installationsfilerne klargøres.</p>'}<details><summary>Kontrolsummer og filoversigt</summary><p><a href="SHA256SUMS.txt">Kontrolsummer</a> · <a href="release.json">Filoversigt</a></p></details>`);
  await fs.writeFile(path.join(directory,'index.html'),html);

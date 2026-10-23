@@ -1,16 +1,20 @@
 (() => {
-  let status = null, review = null, managedURL = null;
+  let status = null, review = null, managedURL = null, liveDiagnostics = [];
   const active = () => ['installing', 'starting', 'running', 'stopping'].includes(status?.state);
   const labels = { idle: '', installing: 'Installerer pakker …', installed: 'Pakkerne er klar', starting: 'Starter forhåndsvisningen …', running: 'Forhåndsvisningen kører', stopping: 'Stopper …', stopped: 'Forhåndsvisningen er stoppet', error: 'Forhåndsvisningen kræver din hjælp' };
   function update(value) {
     if (!value || value.root !== current?.root || (value.workspaceRoot && value.workspaceRoot !== current?.workspaceRoot)) return;
-    if (status?.root !== value.root || status?.workspaceRoot !== value.workspaceRoot) { managedURL = null; review = null; $('#server-review').hidden = true; $('#server-scripts').checked = false; }
+    if (status?.root !== value.root || status?.workspaceRoot !== value.workspaceRoot) { managedURL = null; review = null; liveDiagnostics = []; $('#server-review').hidden = true; $('#server-scripts').checked = false; }
     status = value;
     if (value.state === 'running' && value.url && current.previewURL !== value.url) { managedURL = value.url; showPreview(value.url, true); }
     else if (!value.url && managedURL) { if (current.previewURL === managedURL) showPreview(null); managedURL = null; }
     const project = value.project;
+    const diagnostics = [...new Map([...(project?.diagnostics || []), ...liveDiagnostics].map(item => [item.kind + ':' + item.origin, item])).values()];
+    let notice = $('#preview-problem');
+    if (!notice) { notice = node('button', 'Gennemgå forhåndsvisning', 'text-button'); notice.id = 'preview-problem'; notice.type = 'button'; notice.onclick = () => action(open); $('#preview-status').after(notice); }
+    notice.hidden = !diagnostics.length;
     const framework = project && project.kind !== 'static';
-    $('#server-description').textContent = project?.supported ? `${project.label} · ${project.installed ? 'Pakkerne findes i projektet.' : 'Projektets pakker skal installeres, før du kan se appen.'}` : project?.reason || 'Åbn et projekt først.';
+    $('#server-description').textContent = project?.supported ? `${project.label} · ${project.installed ? project.kind === 'services' ? 'Opstarten er klar til gennemgang.' : 'Pakkerne findes i projektet.' : 'Projektets pakker skal installeres, før du kan se appen.'}` : project?.reason || 'Åbn et projekt først.';
     $('#server-status').textContent = value.message || labels[value.state] || '';
     $('#server-primary').hidden = !project?.supported || active();
     $('#server-primary').textContent = project?.installed ? 'Gennemgå opstart' : 'Gennemgå installation';
@@ -21,8 +25,18 @@
     $('#server-reinstall').disabled = active() || running || Boolean(review);
     $('#server-scripts').disabled = active() || Boolean(review);
     $('#server-log').textContent = value.output || 'Ingen proceslog endnu.';
-    $('#server-open').hidden = !framework;
-    $('#server-open').textContent = active() ? 'Vis opstart' : 'error' === value.state ? 'Gennemgå fejlen' : 'Start forhåndsvisning';
+    $('#server-open').hidden = !framework && !diagnostics.length;
+    $('#server-open').textContent = diagnostics.length ? 'Gennemgå forhåndsvisning' : active() ? 'Vis opstart' : 'error' === value.state ? 'Gennemgå fejlen' : 'Start forhåndsvisning';
+    let problems = $('#server-diagnostics');
+    if (!problems) { problems = node('div'); problems.id = 'server-diagnostics'; $('#server-description').after(problems); }
+    problems.hidden = !diagnostics.length; problems.replaceChildren();
+    if (diagnostics.length) {
+      problems.append(node('p', diagnostics[0].message));
+      const repair = node('button', 'Ret med AI'); repair.type = 'button';
+      repair.onclick = () => { $('#preview-dialog').close(); window.draftMessage(diagnostics.map(item => item.message).join('\n') + '\n\n' + diagnostics[0].repair, 'Forslaget står i skrivefeltet. Gennemgå det, før du sender.'); };
+      problems.append(repair);
+      if (diagnostics.length > 1) { const details = node('details'), summary = node('summary', 'Se detaljer'); details.append(summary, ...diagnostics.slice(1).map(item => node('p', item.message))); problems.append(details); }
+    }
     if (!current.previewURL && framework) {
       $('#preview-empty h2').textContent = labels[value.state] || 'Se din app';
       $('#preview-empty p').textContent = value.state === 'error' ? value.message : project.supported ? 'Start projektets lokale server for at se resultatet. Du gennemgår handlingen, før noget køres.' : project.reason;
@@ -43,11 +57,13 @@
     review = await call('previewPrepare', { action: operation, scripts: $('#server-scripts').checked });
     $('#server-actions').hidden = true; $('#server-review').hidden = false;
     $('#server-review-title').textContent = operation === 'install' ? 'Installér projektets pakker?' : 'Start den lokale server?';
-    $('#server-consequence').textContent = operation === 'install' ? `Pakker hentes fra de registre og adresser, projektets npm-opsætning og lockfil angiver. node_modules ${review.project.install === 'ci' ? 'erstattes med lockfilens versioner' : 'oprettes eller opdateres, og package-lock.json kan ændres'}. ${review.scripts ? 'Installationsscripts køres.' : 'Installationsscripts springes over.'}` : 'Projektkode og frameworkets konfiguration køres på din computer. Serveren bindes til 127.0.0.1 og stoppes, når du skifter projekt eller lukker appen.';
+    const multiple = review.project.kind === 'services';
+    const python = review.project.installs?.some(item => item.kind === 'python');
+    $('#server-consequence').textContent = operation === 'install' ? python ? 'Pakker hentes til projektets eget Python-miljø. Pakkernes byggekommandoer kan køre på din computer. Eventuelle npm-pakker installeres i projektet med det viste valg af installationsscripts.' : `Pakker hentes fra de registre og adresser, projektets npm-opsætning og lockfil angiver. node_modules ${review.project.install === 'ci' ? 'erstattes med lockfilens versioner' : 'oprettes eller opdateres, og package-lock.json kan ændres'}. ${review.scripts ? 'Installationsscripts køres.' : 'Installationsscripts springes over.'}` : multiple ? 'De viste programmer køres i projektets mapper. De får lokale adresser og porte og skal bruge dem. Alle projektets tjenester stoppes sammen, når du stopper forhåndsvisningen eller lukker appen.' : 'Projektkode og frameworkets konfiguration køres på din computer. Serveren bindes til 127.0.0.1 og stoppes, når du skifter projekt eller lukker appen.';
     $('#server-authority').textContent = 'Det er ikke en isoleret sandbox. Koden har din brugers adgang til filer og netværk. Appens modelnøgler sendes ikke med som miljøvariabler; projektets egen kode kan læse lokale indstillinger og filer.';
     $('#server-command').textContent = review.command;
     $('#server-folder').textContent = review.root;
-    $('#server-packages').textContent = 'Direkte pakker: ' + review.project.dependencies.join(', ') + (operation === 'start' ? '. Frameworket startes direkte; npm predev og postdev køres ikke.' : '. npm kan også bruge din eksisterende lokale registeropsætning.');
+    $('#server-packages').textContent = (multiple ? 'Programmer: ' : 'Direkte pakker: ') + (review.project.dependencies || []).join(', ') + (operation === 'start' ? multiple ? '. Et valgt npm-script kan også køre projektets før- og efterscripts.' : '. Frameworket startes direkte; npm predev og postdev køres ikke.' : '. Pakkeopsætningen kan bruge dine eksisterende registre.');
     $('#server-confirm').textContent = operation === 'install' ? 'Installér pakker' : 'Start forhåndsvisning';
     $('#server-confirm').disabled = false; update(status);
   }
@@ -62,6 +78,11 @@
   $('#server-stop').onclick = () => action(async () => { await call('previewStop'); await refresh(); });
   // Slutstatus skal genlæse, om installationen nu findes; processen genstartes aldrig her.
   window.harness.onEvent(event => {
+    if (event.type === 'preview.diagnostic' && event.root === current?.root && (!event.workspaceRoot || event.workspaceRoot === current?.workspaceRoot)) {
+      const entry = event.diagnostic;
+      if (entry && !liveDiagnostics.some(item => item.kind === entry.kind && item.origin === entry.origin)) liveDiagnostics.push(entry);
+      if (status) update(status);
+    }
     if (event.type === 'preview.runtime' && ['installed', 'stopped', 'error'].includes(event.state)) void action(refresh);
     if (event.type === 'run.status' && status) update(status);
   });

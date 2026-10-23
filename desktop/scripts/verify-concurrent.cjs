@@ -51,7 +51,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     page = await app.firstWindow(); page.setDefaultTimeout(60000); page.on('pageerror', e => errors.push(e.message)); await helpers.skipIntroduction(page); page.setDefaultTimeout(90000);
   }
   const switchChat = async (title, workspace) => { await row(title).click(); await page.waitForFunction(({ title, workspace }) => document.querySelector('#project-list .chat-row[aria-current="true"]')?.textContent.includes(title) && (!workspace || document.querySelector('#preview')?.dataset.root === workspace), { title, workspace }); };
-  const newChat = async () => { const id = await page.locator('#project-list .chat-row[aria-current="true"]').getAttribute('data-chat'); await page.click('#new-conversation'); await page.waitForFunction(id => document.querySelector('#project-list .chat-row[aria-current="true"]')?.dataset.chat !== id && !document.querySelector('#send').disabled && document.querySelector('#prompt').value === '', id); };
+  const newChat = async () => { const id = await page.locator('#project-list .chat-row[aria-current="true"]').getAttribute('data-chat'); await page.click('#project-list .project-entry.is-current .project-add'); await page.waitForFunction(id => document.querySelector('#project-list .chat-row[aria-current="true"]')?.dataset.chat !== id && !document.querySelector('#send').disabled && document.querySelector('#prompt').value === '', id); };
   const row = title => page.locator('#project-list .chat-row').filter({ hasText: title });
   const send = async text => {
     await helpers.selectMode(page, 'free'); await page.fill('#prompt', text); await page.click('#send');

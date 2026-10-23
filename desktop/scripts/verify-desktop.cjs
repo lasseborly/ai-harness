@@ -55,7 +55,8 @@ const root = path.join(__dirname, '..', '..');
     assert.equal(await page.locator('#onboarding').isVisible(),true);
     await require('./ui-test-helpers.cjs').chooseLocation(app, page, testRoot); await page.click('#create');
     await page.waitForSelector('#workspace:not([hidden])');
-    assert.equal(await page.inputValue('#work-mode'), 'plan');
+    // Et nyt projekt starter i Samtale med idéen klar i skrivefeltet.
+    assert.equal(await page.inputValue('#work-mode'), 'chat');
     assert.match(await page.inputValue('#prompt'), /Find og del aktiviteter/);
     assert.equal(await page.locator('#messages').textContent(), '');
     await page.fill('#prompt', 'Min egen kladde'); assert.equal(await page.isVisible('#start-idea'), false, 'en kladde kan ikke overskrives');

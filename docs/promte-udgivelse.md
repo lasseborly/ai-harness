@@ -4,7 +4,7 @@ Promte Apps kræver konto, betalt aftale og administratoradgang i det valgte app
 
 ## Forbindelse og destination
 
-1. Vælg **Promte Apps** i Del, og angiv organisationens Promte-adresse. Standardadressen er `https://app.promte.dk`.
+1. Vælg **Promte Apps** i Udgiv, og angiv organisationens Promte-adresse. Standardadressen er `https://kodning.promte.dk`.
 2. Installér Promtes officielle uploadværktøj, hvis det ikke allerede findes. Aura installerer ikke pakker automatisk.
 3. Vælg login i Aura. Promtes værktøj åbner browseren, hvor brugeren godkender CLI-adgangen.
 4. Kopiér app-arbejdsområdets ID fra dets adresse i Promte. Aura bruger ingen udokumenteret søgning efter arbejdsområder.
@@ -23,6 +23,8 @@ Login gemmes af det officielle værktøj i `~/.config/promte/credentials.json`, 
 ## Kildekode og gennemgang
 
 Promte-adapteren modtager en React-app, som følger [Promte-skillens byggeregler](../profiles/skills/harness-integration-promte/references/promte.md). Promte leverer sit eget byggeforløb. En almindelig backendserver eller vilkårligt skrivebordsprogram kan ikke udgives ad denne vej.
+
+Udgiv kontrollerer projektets filer på computeren med de samme regler, før brugeren logger ind hos Promte. Et almindeligt Aura-projekt, hvor hjemmesiden ligger i `public/` uden `package.json`, får en forklaring og to valg: **Gør projektet klar til Promte** eller **Vælg en anden udbyder**. Det første slår Promte-integrationen til for projektet, så AI’en kender reglerne, og lægger en besked i skrivefeltet, som brugeren selv sender. Gennemgangen af den gemte version bruger fortsat reglerne og forklarer en afvisning på samme måde.
 
 Aura kræver, at installationen bekræfter kildekodeupload. Der er ingen automatisk overgang til ældre serveres upload af færdigbyggede filer.
 

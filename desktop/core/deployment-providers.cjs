@@ -3,15 +3,59 @@ const fs = require('node:fs/promises');
 const { existsSync } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-function command(executable, args, { cwd = os.tmpdir(), input, extra = {}, timeout = 60000 } = {}) {
-  if (!path.isAbsolute(executable)) {
+const runtime = require('./runtime.cjs');
+const missingCommand = () => new Error('Hostingværktøjet blev ikke fundet. Kontrollér installationen eller angiv programmets fulde sti ved appstart.');
+async function windowsLaunch(executable, args, env, { cwd = os.tmpdir(), paths = path.win32, node = runtime.get()?.node } = {}) {
+  const fileExists = async file => { try { return (await fs.stat(file)).isFile(); } catch { return false; } };
+  const find = async name => {
+    const explicit = paths.isAbsolute(name) || /[\\/]/.test(name);
+    const directories = explicit ? [''] : (env.PATH || '').split(';').filter(Boolean).map(p => p.replace(/^"(.*)"$/, '$1'));
+    for (const directory of directories) {
+      const base = explicit ? paths.resolve(cwd, name) : paths.join(directory, name);
+      for (const suffix of paths.extname(base) ? [''] : ['.exe', '.com', '.cmd', '.bat']) {
+        if (await fileExists(base + suffix)) return base + suffix;
+      }
+    }
+    throw missingCommand();
+  };
+  const file = await find(executable);
+  if (/\.(?:exe|com)$/i.test(file)) return { executable: file, args, extra: {} };
+  if (!/\.(?:cmd|bat)$/i.test(file) || (await fs.stat(file)).size > 16384) throw new Error('Hostingværktøjets startfil understøttes ikke. Brug udbyderens officielle installation.');
+  const source = await fs.readFile(file, 'utf8'), directory = paths.dirname(file);
+  // Batchfiler køres aldrig gennem cmd.exe: URL'er og filnavne skal forblive argumenter.
+  const azure = source.match(/^\s*"?%~dp0\\?\.\.\\python\.exe"?\s+-IBm\s+azure\.cli\s+%\*\s*$/im);
+  if (paths.basename(file).toLowerCase() === 'az.cmd' && azure) {
+    const python = paths.resolve(directory, '..', 'python.exe');
+    if (!await fileExists(python)) throw missingCommand();
+    return { executable: python, args: ['-IBm', 'azure.cli', ...args], extra: { AZ_INSTALLER: 'MSI' } };
+  }
+  const npm = source.match(/"%_prog%"\s+"%dp0%\\([^"\r\n%]+)"\s+%\*\s*$/im);
+  const legacy = [...source.matchAll(/(?:\"%~dp0\\?node\.exe\"|\bnode)\s+"%~dp0\\?([^"\r\n%]+)"\s+%\*/gim)];
+  const target = npm && /SET\s+"_prog=node"/i.test(source) ? npm[1] : legacy.length === 2 && legacy[0][1] === legacy[1][1] ? legacy[0][1] : null;
+  if (!target || !/\.(?:c|m)?js$/i.test(target)) throw new Error('Hostingværktøjets startfil understøttes ikke. Brug udbyderens officielle npm-installation eller Azure CLI.');
+  const script = paths.resolve(directory, ...target.split('\\'));
+  if (!await fileExists(script)) throw missingCommand();
+  const adjacent = paths.join(directory, 'node.exe');
+  const interpreter = await fileExists(adjacent) ? adjacent : node && await fileExists(node) ? node : await find('node.exe');
+  return { executable: interpreter, args: [script, ...args], extra: {} };
+}
+async function command(executable, args, { cwd = os.tmpdir(), input, extra = {}, timeout = 60000 } = {}) {
+  if (process.platform !== 'win32' && !path.isAbsolute(executable)) {
     const local=path.join(os.homedir(), '.local', 'bin', executable);
     if(existsSync(local)) executable=local;
   }
-  const env = Object.fromEntries(['PATH','HOME','USERPROFILE','APPDATA','LOCALAPPDATA','SystemRoot','TEMP','TMP','TMPDIR'].filter(k => process.env[k]).map(k => [k,process.env[k]]));
+  const env = {};
+  for (const key of ['PATH','HOME','USERPROFILE','APPDATA','LOCALAPPDATA','SystemRoot','TEMP','TMP','TMPDIR']) {
+    const actual = Object.keys(process.env).find(k => k.toUpperCase() === key.toUpperCase());
+    if (actual) env[key] = process.env[actual];
+  }
   Object.assign(env, { NO_COLOR:'1', CI:'1', VERCEL_TELEMETRY_DISABLED:'1', ...extra });
+  if (process.platform === 'win32') {
+    const launch = await windowsLaunch(executable, args, env, { cwd });
+    executable = launch.executable; args = launch.args; Object.assign(env, launch.extra);
+  }
   return new Promise((resolve,reject) => {
-    const child = execFile(executable,args,{cwd,env,timeout,maxBuffer:32*1024*1024,windowsHide:true},(error,stdout)=>error ? reject(new Error(error.code==='ENOENT'?'Hostingværktøjet blev ikke fundet. Kontrollér installationen eller angiv programmets fulde sti ved appstart.':'Hostingværktøjet kunne ikke gennemføre handlingen. Kontrollér installation, login og destination. Ved upload kan resultatet være ukendt; kontrollér udbyderen før et nyt forsøg.')) : resolve(stdout));
+    const child = execFile(executable,args,{cwd,env,timeout,maxBuffer:32*1024*1024,windowsHide:true,shell:false},(error,stdout)=>error ? reject(error.code==='ENOENT' ? missingCommand() : new Error('Hostingværktøjet kunne ikke gennemføre handlingen. Kontrollér installation, login og destination. Ved upload kan resultatet være ukendt; kontrollér udbyderen før et nyt forsøg.')) : resolve(stdout));
     child.stdin.on('error',()=>{}); child.stdin.end(input);
   });
 }
@@ -74,9 +118,12 @@ class AzureDeployment {
   }
   async status(c,receipt) {
     const list=await this.az(['environment','list',...this.args(c)]);
-    const e=list.find(x=>(x.buildId||x.name?.split('/').pop())==='harness-test');
+    // SWA fjerner bindestregen fra det navngivne miljø. Bevar også det gamle
+    // præcise navn, så tidligere kvitteringer stadig kan kontrolleres.
+    const e=list.filter(x=>['harnesstest','harness-test'].includes(x.buildId||x.name?.split('/').pop()))
+      .sort((a,b)=>Date.parse(b.lastUpdatedOn)-Date.parse(a.lastUpdatedOn))[0];
     if(!e || !(Date.parse(e.lastUpdatedOn)>=Date.parse(receipt.startedAt))) return {state:'AWAITING_UPDATE',url:null};
     return {state:e.status==='Ready'?'READY':e.status||'UNKNOWN',url:e.hostname?publicURL(e.hostname,'.azurestaticapps.net'):null};
   }
 }
-module.exports={VercelDeployment,AzureDeployment,command,publicURL,azureResourceGroup,azureAppName};
+module.exports={VercelDeployment,AzureDeployment,command,windowsLaunch,publicURL,azureResourceGroup,azureAppName};

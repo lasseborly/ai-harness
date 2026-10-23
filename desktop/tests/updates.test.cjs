@@ -79,14 +79,15 @@ function releaseFixture() {
   const release = { tag_name: 'v' + version, draft: false, prerelease: true, published_at: new Date().toISOString(), body: 'Prøve', assets: [...files.map(f => ({ name: f.name, size: f.bytes, digest: 'sha256:' + f.sha256 })), { name: 'release.json', size: data.length, digest: 'sha256:' + createHash('sha256').update(data).digest('hex') }, { name: 'SHA256SUMS.txt' }].map(f => ({ ...f, state: 'uploaded', browser_download_url: assetURL('v' + version, f.name) })) };
   return { manifest, data, release };
 }
-test('Udgivelsen binder Mac-ZIP og Windows-installation til faktiske hashes og platforme', async t => {
+test('Udgivelsen binder Mac-ZIP, Windows og Linux til faktiske hashes og platforme', async t => {
   const f = releaseFixture(), output = await fs.mkdtemp(path.join(os.tmpdir(), 'aura-feeds-')); t.after(() => fs.rm(output, { recursive: true, force: true }));
   const checksums = f.manifest.files.map(file => `${file.sha256}  ${file.name}`).join('\n');
-  assert.equal(validateRelease({ ...f.release, draft: true }, f.manifest, checksums, version).files.length, 5);
-  assert.equal(updateFeeds(f.manifest).length, 3);
+  assert.equal(validateRelease({ ...f.release, draft: true }, f.manifest, checksums, version).files.length, 6);
+  assert.equal(updateFeeds(f.manifest).length, 4);
   await buildUpdateFeeds([f.release], output, async () => new Response(f.data));
-  for (const platform of ['darwin-arm64', 'darwin-x64', 'win32-x64']) {
-    const feed = JSON.parse(await fs.readFile(path.join(output, 'updates/beta', platform, platform.startsWith('darwin') ? 'beta-mac.yml' : 'beta.yml')));
+  for (const platform of ['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64']) {
+    const feedFile = platform.startsWith('darwin') ? 'beta-mac.yml' : platform.startsWith('linux') ? 'beta-linux.yml' : 'beta.yml';
+    const feed = JSON.parse(await fs.readFile(path.join(output, 'updates/beta', platform, feedFile)));
     assert.doesNotThrow(() => validateInfo(feed, { version: '0.2.0-beta.6', platform: platform.split('-')[0], arch: platform.split('-')[1] }));
   }
   await assert.rejects(buildUpdateFeeds([f.release], output, async () => new Response('ændret')), /kontrolsum/);

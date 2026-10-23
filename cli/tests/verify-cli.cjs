@@ -51,7 +51,7 @@ const { spawn } = require('node:child_process');
     assert.match(system, /CLI-PROJEKTREGEL/, 'Projektets egne regler når den faktiske modelserver');
     assert.match(system, /Kilde: AGENTS.md/, 'Reglernes oprindelse følger med');
     assert.match(system, /\/save/); assert.match(system, /\/deploy/);
-    assert.doesNotMatch(system, /appens Del-knap|Auras knap Del|Start forhåndsvisning/);
+    assert.doesNotMatch(system, /appens Udgiv-knap|Auras knap Udgiv|Start forhåndsvisning/);
     assert.ok(modes.has('reject') && modes.has('error'), 'Afvisning og forbindelsesfejl skal nå serveren');
     await assert.rejects(fs.stat(path.join(state, 'cli.lock')), { code: 'ENOENT' });
     console.log(output.trim()); console.log(JSON.stringify({ root, entry, platform: process.platform, arch: process.arch, motor: 'rigtig OpenCode', model: 'kontrolleret lokal server', betalteKald: 0 }));

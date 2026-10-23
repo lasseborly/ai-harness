@@ -51,6 +51,15 @@
     if (Number.isInteger(tool.exit)) return tool.exit === 0 ? { ok: true, text: 'Afsluttet uden fejl (kode 0)' } : { ok: false, text: `Afsluttet med fejl (kode ${tool.exit})` };
     return { ok: null, text: tool.status === 'completed' ? 'Afsluttet; afslutningskoden er ukendt' : 'Blev ikke færdig' };
   }
-  const api = { parseUnifiedDiff, commandHints, failureText, commandResult };
+  // Kun hovedprocessens kanoniske nøgle må samle kort. Uden den er hvert id sit
+  // eget kort; en enslydende titel eller sti er ikke bevis på samme adgang.
+  const groupKey = p => p?.policy?.key && p.policy.match ? p.policy.key : `request:${p?.id || ''}`;
+  function receiptText({ count = 1, label = 'handlingen', allow = true, scope, message, automatic = false }) {
+    const number = `${count} ${count === 1 ? 'handling' : 'handlinger'}`;
+    if (!allow) return message ? `Du afviste ${number} og skrev: ${message}` : `Du afviste ${number}. AI’en stopper.`;
+    if (automatic) return `${number} godkendt automatisk: ${label}.`;
+    return `${number} godkendt${scope === 'project' ? ' med tilladelse gemt i projektet' : scope === 'task' ? ' for denne opgave' : ''}: ${label}.`;
+  }
+  const api = { parseUnifiedDiff, commandHints, failureText, commandResult, groupKey, receiptText };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ApprovalView = api;
 })(typeof window === 'object' ? window : globalThis);

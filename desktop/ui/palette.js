@@ -7,7 +7,7 @@
   let items = [], active = 0, returnFocus = null;
   // Appens egne knapper. Kun knapper, der er synlige i deres sammenhæng og ikke er låst, kan bruges.
   const actions = [
-    { label: 'Ny samtale', target: '#new-conversation', words: ['chat', 'session', 'plus', 'start'], first: true },
+    { label: 'Ny samtale', target: '#project-list .project-entry.is-current .project-add', words: ['chat', 'session', 'plus', 'start'], first: true },
     { label: 'Skriv til AI’en', target: '#prompt', focus: true, words: ['besked', 'skrivefelt', 'prompt'], first: true },
     { label: 'Ret i siden', target: '#preview-pick', words: ['vælg element', 'tekst', 'rediger'], first: true },
     { label: 'Vis forhåndsvisningen', target: '#tab-preview', words: ['preview', 'fane', 'side'] },
@@ -18,7 +18,7 @@
     { label: 'Genindlæs forhåndsvisningen', target: '#refresh', words: ['opdater', 'reload'] },
     { label: 'Gem version', target: '#git-button', words: ['versioner', 'git', 'fortryd', 'historik'], first: true },
     { label: 'Sikkerhedskopi', target: '#publish-button', words: ['github', 'backup', 'upload'] },
-    { label: 'Del', target: '#deploy-button', words: ['udgiv', 'deploy', 'vercel', 'azure'] },
+    { label: 'Udgiv', target: '#deploy-button', words: ['del', 'deling', 'publicer', 'deploy', 'vercel', 'azure'] },
     { label: 'Vælg AI-model', target: '#model-chip', words: ['model', 'indsats', 'skift'] },
     { label: 'Flet ind i projektet', target: '#merge-copy', words: ['kopi', 'indflet', 'samtale'], first: true },
     { label: 'Stop opgaven', target: '#stop', words: ['afbryd', 'stop'], first: true },
@@ -26,6 +26,7 @@
     { label: 'Åbn et projekt fra computeren', target: '#open', words: ['mappe', 'åbn'] },
     { label: 'AI-forbindelser', target: '#connections-button', words: ['udbyder', 'nøgle', 'api'] },
     { label: 'Funktioner', target: '#features-button', words: ['indstillinger', 'slå til', 'slå fra'] },
+    { label: 'Projektets indstillinger', target: '#project-settings-button', words: ['tilladelser', 'godkendelser', 'automatisk', 'opstart', 'server', 'netværk'] },
     { label: 'Hjælp og feedback', target: '#support-button', words: ['support', 'fejlrapport'], first: true },
     { label: 'Aura Harness i dit kodeværktøj', target: '#tools-button', words: ['claude code', 'codex', 'cursor', 'skills'] },
     { label: 'Vis introduktion', target: '#intro-button', words: ['velkomst', 'guide'] },
@@ -54,14 +55,14 @@
       const label = typeof entry.label === 'function' ? entry.label() : entry.label;
       found.push({ group: 'Handlinger', label, words: entry.words, first: entry.first, run: () => { if (entry.focus) element.focus(); else { element.click(); if (element.getAttribute('role') === 'tab') element.focus(); } } });
     }
-    const projects = window.chats?.projects() || [], busy = anyRunning();
+    const projects = window.chats?.projects() || [];
     const open = projects.find(project => project.root === current?.root);
     for (const chat of open?.chats || []) {
-      if (chat.id === view.id) continue;
+      if (chat.id === view.id || chat.archived) continue;
       found.push({ group: 'Samtaler', label: chat.title || 'Ny samtale', meta: window.chats.meta(chat), words: [open.name, 'samtale'], first: true, run: () => window.chats.openChat(open, chat.id) });
     }
     for (const project of projects) {
-      if (project.root === current?.root || !project.id || busy) continue;
+      if (project.root === current?.root || !project.id) continue;
       found.push({ group: 'Projekter', label: project.name, meta: 'Projekt', words: ['projekt', ...(project.chats || []).map(chat => chat.title || '')], first: true, run: () => window.chats.openProject(project) });
     }
     return found;

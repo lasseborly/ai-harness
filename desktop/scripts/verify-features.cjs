@@ -97,7 +97,7 @@ const helpers = require('./ui-test-helpers.cjs');
     assert.equal(await page.isVisible('#design-options'), false); assert.equal(await page.isVisible('#startup-hosting-row'), false);
     // ⓘ uden for en dialog: et klik åbner forklaringen, Escape lukker den, og fokus vender tilbage til knappen.
     await page.click('#onboarding .intro .info');
-    await page.locator('#info-pop').filter({ hasText: 'lokal hjemmeside' }).waitFor();
+    await page.locator('#info-pop').filter({ hasText: 'foreslår teknologi ud fra din idé' }).waitFor();
     await page.keyboard.press('Escape'); await page.waitForFunction(() => !document.querySelector('#info-pop').matches(':popover-open'));
     assert.equal(await page.evaluate(() => document.activeElement.matches('#onboarding .intro .info')), true);
     // Flere valg viser kun AI og tests; udgivelse og design hører til funktioner, der er slået fra.
@@ -108,11 +108,14 @@ const helpers = require('./ui-test-helpers.cjs');
     await page.waitForSelector('#workspace:not([hidden])');
     project = path.join(documents, 'Aura', (await fs.readdir(path.join(documents, 'Aura')))[0]);
     assert.deepEqual(await log(), ['Projekt oprettet'], 'Versioner og fortryd giver Git fra start');
-    assert.equal(await page.isVisible('#deploy-button'), false, 'Del er skjult uden Deling og udgivelse');
+    // Udgiv er altid synlig; uden Udgivelse viser Udgiv det næste trin.
+    assert.equal(await page.isVisible('#deploy-button'), true); assert.equal(await page.evaluate(() => window.sharingOn()), false, 'deling er slået fra');
     await page.click('#project-menu-toggle');
     assert.equal(await page.isVisible('#git-button'), true); assert.equal(await page.isVisible('#publish-button'), false);
     await page.keyboard.press('Escape');
-    assert.equal(await page.inputValue('#work-mode'), 'free', 'uden planlægning arbejder AI’en direkte');
+    // Standardtilstanden er Samtale; prøven arbejder direkte, som uden planlægning.
+    assert.equal(await page.inputValue('#work-mode'), 'chat');
+    await page.click('#composer-mode'); await page.selectOption('#work-mode', 'free'); await page.click('[data-close="task-dialog"]');
     assert.match(await page.inputValue('#prompt'), /tre fiktive mødelokaler/);
     // 3. Første opgave: kun Git-skillen kan hentes, og appens regler følger funktionerne.
     await helpers.addConnection(page, { name: 'Kontrolleret model', baseURL: `http://127.0.0.1:${server.address().port}/v1` });
@@ -124,7 +127,7 @@ const helpers = require('./ui-test-helpers.cjs');
     await heading('Udkast 1'); await page.locator('#run-review button').filter({ hasText: 'Fortryd opgaven' }).waitFor({ timeout: 90000 });
     await page.waitForFunction(() => document.querySelector('#run-status').textContent === 'Klar');
     assert.deepEqual(prompts[0].skills, ['harness-git-og-samarbejde']);
-    for (const text of ['APPENS REGLER', 'FÆLLES-GRUNDLAG-02', 'slået planlægning før bygning fra', 'Deling og udgivelse er slået fra', 'gemmer selv en version efter hver AI-opgave']) assert.ok(prompts[0].system.includes(text), text);
+    for (const text of ['APPENS REGLER', 'FÆLLES-GRUNDLAG-02', 'slået planlægning før bygning fra', 'Udgivelse er slået fra', 'gemmer selv en version efter hver AI-opgave']) assert.ok(prompts[0].system.includes(text), text);
     assert.match((await log())[0], /^AI-opgave: /);
     // 4. Indstillinger › Funktioner: en undtagelse for projektet og en ændring for alle projekter.
     await helpers.menuClick(page, '#features-button'); await page.waitForSelector('#features-dialog[open]');
@@ -139,16 +142,16 @@ const helpers = require('./ui-test-helpers.cjs');
     await skillsInfo.click(); await page.waitForFunction(() => !document.querySelector('#info-pop').matches(':popover-open'));
     assert.equal(await skillsInfo.getAttribute('aria-expanded'), 'false');
     await page.locator('#features-scope label').filter({ hasText: 'Kun' }).click();
-    // Planlægning skifter arbejdsmåden med det samme, når der ikke er en plan i gang, og Brug standarden skifter tilbage.
+    // Et skift af Planlægning sætter arbejdsmåden tilbage til standarden, Samtale, når der ikke er en plan i gang.
     await toggle('#features-list', 'planlaegning').check();
-    await page.waitForFunction(() => document.querySelector('#work-mode').value === 'plan');
+    await page.waitForFunction(() => document.querySelector('#work-mode').value === 'chat');
     await page.locator('#features-list .feature-row[data-feature="planlaegning"] button').filter({ hasText: 'Brug standarden' }).click();
-    await page.waitForFunction(() => document.querySelector('#work-mode').value === 'free');
+    await page.waitForFunction(() => document.querySelector('#work-mode').value === 'chat');
     assert.deepEqual((await features()).exceptions, {});
     await toggle('#features-list', 'deling').check();
     await page.locator('#features-list .feature-note').filter({ hasText: 'Kun i dette projekt: slået til.' }).waitFor();
     assert.deepEqual((await features()).exceptions, { deling: true });
-    assert.equal(await page.isVisible('#deploy-button'), true, 'Del vises i projektet med undtagelsen');
+    assert.equal(await page.evaluate(() => window.sharingOn()), true, 'deling er slået til i projektet med undtagelsen');
     // En integration slås til for projektet. Dens ⓘ viser ejer, adgang og dataflow.
     await toggle('#features-list', 'integration-adresser').check();
     await page.locator('#features-list .feature-row[data-feature="integration-adresser"] .feature-note').filter({ hasText: 'Kun i dette projekt: slået til.' }).waitFor();
@@ -162,16 +165,17 @@ const helpers = require('./ui-test-helpers.cjs');
     await page.locator('#features-always > summary, .features-always > summary').first().click();
     await shot('funktioner-panel');
     await page.click('[data-close="features-dialog"]');
+    await page.click('#composer-mode'); await page.selectOption('#work-mode', 'free'); await page.click('[data-close="task-dialog"]');
     // 5. Næste opgave starter en ny modelsession med de nye skills og regler.
     const second = await sendTask('Gør overskriften tydeligere.', true);
     assert.deepEqual(second.skills, ['harness-afproevning-og-fejlretning', 'harness-git-og-samarbejde', 'harness-integration-adresser', 'harness-kodestil', 'harness-overdragelse-og-drift', 'harness-udgivelse-og-gendannelse']);
-    assert.ok(second.system.includes('Del-knap'));
+    assert.ok(second.system.includes('Udgiv-knap'));
     assert.ok(second.system.includes('slået disse integrationer til: Adresser'));
     // 6. Uden Versioner og fortryd får et nyt projekt ingen Git, og resultatkortet tilbyder ikke versioner.
     await helpers.menuClick(page, '#features-button'); await page.locator('#features-scope label').filter({ hasText: 'Alle projekter' }).click();
     await toggle('#features-list', 'versioner').uncheck();
     await page.locator('#features-list .feature-note').filter({ hasText: 'slået til, men kræver Versioner og fortryd' }).waitFor();
-    assert.equal(await page.isVisible('#deploy-button'), false, 'deling kræver versionerne, også som undtagelse');
+    assert.equal(await page.evaluate(() => window.sharingOn()), false, 'deling kræver versionerne, også som undtagelse');
     await page.click('[data-close="features-dialog"]');
     await page.click('#new'); await page.waitForSelector('#onboarding:not([hidden])');
     await page.fill('#purpose', 'Jeg vil lave en liste over fiktive cykelruter.'); await page.fill('#name', 'Cykelruter'); await page.click('#create');
@@ -180,6 +184,7 @@ const helpers = require('./ui-test-helpers.cjs');
     await assert.rejects(fs.access(path.join(project, '.git')), 'intet Git-repository uden versioner');
     await page.click('#project-menu-toggle'); assert.equal(await page.isVisible('#git-button'), false); await page.keyboard.press('Escape');
     await chooseModel();
+    await page.click('#composer-mode'); await page.selectOption('#work-mode', 'free'); await page.click('[data-close="task-dialog"]');
     const third = await sendTask('', false);
     assert.equal(await page.locator('#run-review button').filter({ hasText: 'Gem version' }).count(), 0);
     assert.ok(third.system.includes('slået versioner fra')); assert.ok(!third.skills.includes('harness-git-og-samarbejde'));

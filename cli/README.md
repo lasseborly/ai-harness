@@ -47,7 +47,7 @@ Samtaler, kladder, planer og modelvalg gemmes uden for projektet. `/history` vis
 
 Ollama kan findes på standardadressen. En anden Ollama-server eller en kompatibel API kan angives manuelt, også en DGX Spark på en adresse, du har adgang til gennem Tailscale. Aura opsætter ikke Tailscale og ændrer ikke serveren. Et svar fra `/models` beviser hverken kodeevner, kvote eller faktisk behandlingssted.
 
-Komplai bruges kun til udgivelse gennem **Del → komplai Run** i desktopappen. Terminalens AI-valg omfatter ikke Komplai. En tidligere gemt Komplai-forbindelse kan ikke hente modeller eller sende opgaver; vælg selv en anden AI med `/model`. Samtaler og tidligere forbrug bevares.
+Komplai bruges kun til udgivelse gennem **Udgiv → komplai Run** i desktopappen. Terminalens AI-valg omfatter ikke Komplai. En tidligere gemt Komplai-forbindelse kan ikke hente modeller eller sende opgaver; vælg selv en anden AI med `/model`. Samtaler og tidligere forbrug bevares.
 
 `aura logout` fjerner en valgt forbindelse. For en gammel Komplai-browserforbindelse tilbagekaldes Auras adgang først; fejler tilbagekaldelsen, bevares forbindelsen til et nyt forsøg. Et manuelt indsat token fjernes kun lokalt og kan tilbagekaldes i Komplai. Run-adgangen i desktopappen berøres ikke.
 

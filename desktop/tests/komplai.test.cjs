@@ -30,9 +30,16 @@ test('Komplai Run: PKCE og forkert state; kun organisationer med Run og ingen AI
   const result = await login.start(async address => {
     authURL = new URL(address); const callback = new URL(authURL.searchParams.get('redirect_uri'));
     callback.searchParams.set('state', 'forkert'); callback.searchParams.set('code', 'testcode');
-    assert.equal((await fetch(callback)).status, 400);
+    const refused = await fetch(callback);
+    assert.equal(refused.status, 400); assert.match(await refused.text(), /<h1>Login kunne ikke bekræftes<\/h1>/);
     callback.searchParams.set('state', authURL.searchParams.get('state'));
-    assert.equal((await fetch(callback)).status, 200);
+    const page = await fetch(callback), html = await page.text();
+    assert.equal(page.status, 200);
+    // Callback-siden har Auras udseende uden scripts eller eksterne filer; stilen er kun tilladt med sin hash.
+    assert.equal(page.headers.get('content-type'), 'text/html; charset=utf-8');
+    assert.match(html, /<h1>Du er logget ind<\/h1>/); assert.doesNotMatch(html, /<script|src=|href=|testcode/);
+    const style = /<style>(.*?)<\/style>/s.exec(html)[1];
+    assert.equal(page.headers.get('content-security-policy'), `default-src 'none'; style-src 'sha256-${require('node:crypto').createHash('sha256').update(style).digest('base64')}'; frame-ancestors 'none'`);
   });
   assert.deepEqual(result, { organisations: [{ id: organisation.id, name: organisation.name, publishing: organisation.publishing }] });
   await assert.rejects(login.connectPublishing('kun-ai', store), /vælg din organisation/);

@@ -14,7 +14,7 @@ async function main() {
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, '<h1>Før ændringen</h1>');
   const requests = [], errors = [], key = 'syntetisk-mistral-noegle';
-  let phase = 'plan', calls = 0, app, offerMedium = true;
+  let phase = 'chat', calls = 0, app, offerMedium = true;
   const note = 'Syntetisk tænkeafsnit til formatkontrol.';
   const thinking = text => ({ type: 'thinking', thinking: [{ type: 'text', text }] });
   const server = http.createServer(async (req, res) => {
@@ -33,11 +33,12 @@ async function main() {
       assert.equal(body.reasoning_effort, undefined, 'Aura sender ikke en opdigtet standardindsats');
       if (phase === 'error') { res.writeHead(401); return res.end(JSON.stringify({ error: { message: key } })); }
       if (phase === 'stop') return;
-      const tool = phase !== 'plan' && calls++ === 0 ? {
+      const tool = !['chat', 'plan'].includes(phase) && calls++ === 0 ? {
         index: 0, id: 'test12345', type: 'function',
         function: { name: 'write', arguments: JSON.stringify({ filePath: file, content: phase === 'reject' ? '<h1>Denne ændring skal afvises</h1>' : '<!doctype html><html lang="da"><title>Prøve</title><h1>En ny startside</h1></html>' }) }
       } : null;
-      const answer = phase === 'plan' ? 'Forslag: Vi ændrer overskriften på startsiden. Kontrollér derefter siden i forhåndsvisningen.' : 'Startsiden er ændret. Se den nye overskrift i forhåndsvisningen.';
+      // En plan har de fire faste afsnit, som Planlæg kræver (conversation-mode.js).
+      const answer = phase === 'chat' ? 'Jeg kan godt hjælpe med overskriften.' : phase === 'plan' ? '## Det bygger vi\nVi ændrer overskriften på startsiden.\n\n## Sådan skal det se ud\nOverskriften står øverst som før.\n\n## Teknik og data\nKun public/index.html ændres. Der er ingen data.\n\n## Det skal du prøve\nÅbn forhåndsvisningen, og kontrollér overskriften.' : 'Startsiden er ændret. Se den nye overskrift i forhåndsvisningen.';
       if (!body.stream) return res.end(JSON.stringify({ id: 'test', object: 'chat.completion', created: 1, model: body.model, choices: [{ index: 0, message: { role: 'assistant', content: [thinking(note), { type: 'text', text: answer }] }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 } }));
       res.setHeader('content-type', 'text/event-stream');
       const send = (delta, finish = null, usage) => res.write('data: ' + JSON.stringify({ id: `test-${requests.length}`, object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason: finish }], ...(usage ? { usage } : {}) }) + '\n\n');
@@ -92,6 +93,13 @@ async function main() {
       await page.waitForFunction(() => document.querySelector('#stop').hidden, null, { timeout: 60000 });
       assert.deepEqual(errors, []);
     }
+    // Samtale er standard. Den første besked skal vise Før du sender og få svar; i 0.4 og 0.5.0-beta.1 fejlede den.
+    assert.equal(await page.inputValue('#work-mode'), 'chat');
+    await send('Hvad kan du hjælpe med?'); await finished();
+    await page.locator('#messages').filter({ hasText: 'Jeg kan godt hjælpe med overskriften.' }).waitFor();
+    // Prøvens planforløb kræver Planlæg.
+    phase = 'plan'; calls = 0;
+    await helpers.selectMode(page, 'plan');
     await send('Planlæg en ny overskrift på startsiden.'); await finished();
     await page.waitForSelector('#plan-card:not([hidden])');
     assert.equal(await fs.readFile(file, 'utf8'), '<h1>Før ændringen</h1>');
@@ -109,7 +117,8 @@ async function main() {
     assert.ok(build.some(request => request.body.messages.some(message => message.role === 'assistant' && Array.isArray(message.content) && message.content.some(part => part.type === 'thinking'))), 'tænkeafsnittet følger med tilbage til Mistral efter værktøjskaldet');
     assert.doesNotMatch(await page.locator('#messages').textContent(), /Syntetisk tænkeafsnit/);
     const usage = (await page.evaluate(() => window.harness.connectionState())).value.usage;
-    assert.equal(usage.calls, 3); assert.equal(usage.input, 300); assert.equal(usage.output + usage.reasoning, 150); assert.ok(Math.abs(usage.cost - 0.001035) < 1e-10); assert.equal(usage.unpriced, 0);
+    // Samtalens første besked, planen og to byggekald.
+    assert.equal(usage.calls, 4); assert.equal(usage.input, 400); assert.equal(usage.output + usage.reasoning, 200); assert.ok(Math.abs(usage.cost - 0.00138) < 1e-10); assert.equal(usage.unpriced, 0);
     await page.screenshot({ path: path.join(root, 'kode-og-preview.png'), animations: 'disabled' });
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().startsWith('harness://')).setSize(980, 720));
     await page.click('#model-chip'); await page.screenshot({ path: path.join(root, 'modelvalg-lille.png'), animations: 'disabled' }); await helpers.closeTaskOptions(page);

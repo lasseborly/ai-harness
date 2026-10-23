@@ -17,6 +17,16 @@ test('kun en konkret plan giver et byggekort; afvisningen fra demoen er almindel
   assert.equal(mode.action('Et svar.\n<!-- aura:offer-plan -->'), 'plan');
   assert.equal(mode.action('Et almindeligt spørgsmål'), null);
 });
+test('planoverskriften fra den faktiske Promte-samtale giver et byggekort', () => {
+  for (const title of ['Det skal du prøve (i forhåndsvisningen)', 'Det skal du prøve i forhåndsvisningen']) {
+    const actual = plan.replace('Det skal du prøve', title);
+    assert.equal(mode.concretePlan(actual), true);
+  }
+});
+test('brugerens klare byggebesked kan starte bygning, men omtale og afvisning kan ikke', () => {
+  for (const text of ['byg', 'Byg planen', 'ja, byg den', 'go ahead and build', 'Build it!', 'gå i gang med at bygge']) assert.equal(mode.buildRequest(text), true, text);
+  for (const text of ['byg ikke endnu', 'nej, byg ikke', 'kan du bygge?', 'hvordan bygger man?', 'modellen sagde "byg"', 'for at fortsætte: byg', 'go ahead and build?']) assert.equal(mode.buildRequest(text), false, text);
+});
 test('Samtale bruger plan-agenten med forbud mod ændringer og kommandoer', async () => {
   const policy = permissions('/projekt', [], 'chat');
   for (const tool of ['write', 'edit', 'bash', 'task', 'apply_patch']) assert.equal(policy[tool] || policy['*'], 'deny');

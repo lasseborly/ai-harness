@@ -83,7 +83,7 @@ Når du har en Aura-installation, kan du vælge **Prøv et eksempel** ved opstar
 
 *Et lokalt eksempel, der viser samspillet mellem besked og forhåndsvisning. Der foretages ingen modelkald.*
 
-[Hent Aura til Mac eller Windows](https://ai-alliancen-org.github.io/ai-harness/desktop.html). Beta 0.2.0-beta.6 er offentliggjort 15. oktober 2026 og kan hentes uden GitHub-login. Begge Mac-pakker er signerede og notariserede; Windows-pakken er usigneret. Se [udgivelsesnoter](https://github.com/ai-alliancen-org/ai-harness/releases/tag/v0.2.0-beta.6) og [platformsafprøvning](docs/teststatus.md).
+[Hent Aura til Mac eller Windows](https://ai-alliancen-org.github.io/ai-harness/desktop.html) uden GitHub-login. Downloadsiden viser den seneste offentliggjorte beta og dens udgivelsesnoter. Mac-pakkerne er signerede og notariserede; Windows-pakken er usigneret. Se [platformsafprøvning](docs/teststatus.md) for den konkrete version.
 
 ### Start fra kildekoden
 
@@ -103,7 +103,7 @@ Se [installation, opsætning og lokale testkommandoer](https://github.com/ai-all
 
 ## Teknologi, data og betastatus
 
-Aura er en Electron-app til Mac og Windows med OpenCode som lokal kodeagent. Vi bruger en fast version gennem en adapter; AI-modellen er et separat valg. Grundregler og skills kommer fra det samme bibliotek, uanset om du bruger Aura eller dit eget kodeværktøj.
+Aura er en Electron-app til Mac, Windows og Linux med OpenCode som lokal kodeagent. Vi bruger en fast version gennem en adapter; AI-modellen er et separat valg. Grundregler og skills kommer fra det samme bibliotek, uanset om du bruger Aura eller dit eget kodeværktøj.
 
 Lokale projektfiler betyder ikke, at al databehandling er lokal. En ekstern model eller hostingtjeneste kan modtage kode og data. Den konkrete brug skal derfor vurderes ud fra de valgte tjenester, adgangsforhold og organisationens krav.
 
